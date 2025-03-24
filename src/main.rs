@@ -5,9 +5,10 @@ use std::{
     path::Path,
 };
 
-use executer::{Context, execute};
+use executer::{Context, interpret};
 use expression::Parser;
 use tokenizer::tokenize;
+use tracing::{error, warn};
 use tracing_subscriber::EnvFilter;
 
 mod executer;
@@ -35,12 +36,25 @@ fn interactive_mode() {
     let mut context = Context::new();
     for line in stdin().lines() {
         if let Ok(line) = line {
-            let tokens = tokenize(&line);
-            let mut parser = Parser::new(tokens);
-            let expr = parser.parse().unwrap();
-            let res = execute(&mut context, expr);
-            context.flush_stdout().expect("Failed writing to stdout");
-            println!("Result: {:?}", res);
+            if let Ok(tokens) = tokenize(&line) {
+                let mut parser = Parser::new(tokens);
+                if let Ok(Some(expr)) = parser.parse() {
+                    let res = interpret(&mut context, expr);
+                    match res {
+                        Ok(res) => {
+                            context.flush_stdout().expect("Failed writing to stdout");
+                            println!("Result: {:?}", res);
+                        }
+                        Err(err) => {
+                            println!("Failed interpreting: {}", err)
+                        }
+                    }
+                } else {
+                    println!("Failed parsing");
+                }
+            } else {
+                println!("Failed tokenizing");
+            }
         }
     }
 }
@@ -62,9 +76,9 @@ fn check_arg(arg: &str) {
 fn interpret_string(inp: &str) {
     let mut context = Context::new();
     let tokens = tokenize(&inp);
-    let mut parser = Parser::new(tokens);
-    let expr = parser.parse().unwrap();
-    let res = execute(&mut context, expr);
+    let mut parser = Parser::new(tokens.unwrap());
+    let expr = parser.parse().unwrap().unwrap();
+    let res = interpret(&mut context, expr);
     context.flush_stdout().expect("Failed writing to stdout");
     println!("Result: {:?}", res);
 }

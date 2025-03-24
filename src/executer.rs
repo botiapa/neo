@@ -59,9 +59,9 @@ impl Context {
             }
             Ok(var.set_value(value))
         } else {
-            let var = Variable::new_mutable(Some(value));
-            let entry = self.vars.entry(name.to_string()).insert_entry(var);
-            Ok(entry.get().get_value().unwrap())
+            let var = Variable::new_mutable(Some(value.clone()));
+            self.vars.insert(name.to_string(), var);
+            Ok(value)
         }
     }
 
@@ -78,7 +78,7 @@ impl Context {
     }
 }
 
-pub(crate) fn execute(c: &mut Context, expr: Expr) -> Expr {
+pub(crate) fn interpret(c: &mut Context, expr: Expr) -> Result<Expr, String> {
     match expr {
         Expr::Binary(op, a, b) => match op {
             BinaryOp::Add => binary_op(c, add, *a, *b),
@@ -90,61 +90,71 @@ pub(crate) fn execute(c: &mut Context, expr: Expr) -> Expr {
         Expr::Block(expressions) => {
             let mut last = Expr::NoOp;
             for expr in expressions {
-                last = execute(c, expr.into());
+                last = interpret(c, expr.into())?;
             }
-            last
+            Ok(last)
         }
-        Expr::NumLit(_) | Expr::StringLit(_) => expr,
+        Expr::NumLit(_) | Expr::StringLit(_) => Ok(expr),
         Expr::Identifier(var_name) => c
             .get_var(&var_name)
-            .expect(&format!("variable({}) not set", var_name)),
+            .ok_or(format!("variable({}) not set", var_name)),
         Expr::Assignment(var_name, value) => execute_assignment(c, var_name, *value),
         expr => unimplemented!("{:?}", expr),
     }
 }
 
-fn execute_assignment(c: &mut Context, var_name: String, value: Expr) -> Expr {
-    let res = c.set_var(&var_name, value).unwrap();
+fn execute_assignment(c: &mut Context, var_name: String, value: Expr) -> Result<Expr, String> {
+    let res = c.set_var(&var_name, value)?;
     trace!("Set variable({}) to {:?}", var_name, res);
-    res
+    Ok(res)
 }
 
-fn execute_base_function(c: &mut Context, name: &str, args: Vec<Expr>) -> Expr {
+fn execute_base_function(c: &mut Context, name: &str, args: Vec<Expr>) -> Result<Expr, String> {
     match name {
-        "yap" => yap(c, args.get(0).expect("Expected argument")),
+        "yap" => yap(c, args.get(0).ok_or("Expected an argument")?),
         _ => unimplemented!(),
     }
 }
 
-fn expect_numlit(c: &mut Context, expr: Expr) -> Expr {
+fn expect_numlit(c: &mut Context, expr: Expr) -> Result<Expr, String> {
     match expr {
-        Expr::NumLit(_) => expr,
-        _ => execute(c, expr),
+        Expr::NumLit(_) => Ok(expr),
+        _ => interpret(c, expr),
     }
 }
 
-fn expect_literal(c: &mut Context, expr: Expr) -> Expr {
+fn expect_literal(c: &mut Context, expr: Expr) -> Result<Expr, String> {
     match expr {
-        Expr::NumLit(_) | Expr::StringLit(_) => expr,
-        _ => execute(c, expr),
+        Expr::NumLit(_) | Expr::StringLit(_) => Ok(expr),
+        _ => interpret(c, expr),
     }
 }
 
-fn yap(c: &mut Context, output: &Expr) -> Expr {
-    let arg = expect_literal(c, output.clone());
+fn yap(c: &mut Context, output: &Expr) -> Result<Expr, String> {
+    let arg = expect_literal(c, output.clone())?;
     let s = match arg {
         Expr::NumLit(a) => a.to_string(),
         Expr::StringLit(s) => s,
-        _ => panic!("Invalid argument, expected number or string, got {:?}", arg),
+        _ => {
+            return Err(format!(
+                "Invalid argument, expected number or string, got {:?}",
+                arg
+            ));
+        }
     };
     c.stdout.push(s.to_string());
-    Expr::NoOp.into()
+    Ok(Expr::NoOp)
 }
 
-fn binary_op(c: &mut Context, op: fn(Expr, Expr) -> Expr, a: Expr, b: Expr) -> Expr {
-    let a = expect_numlit(c, a);
-    let b = expect_numlit(c, b);
-    op(a, b)
+fn binary_op(
+    c: &mut Context,
+    op: fn(Expr, Expr) -> Expr,
+    a: Expr,
+    b: Expr,
+) -> Result<Expr, String> {
+    let a = expect_numlit(c, a)?;
+    let b = expect_numlit(c, b)?;
+    Ok(op(a, b))
 }
 
 fn add(a: Expr, b: Expr) -> Expr {

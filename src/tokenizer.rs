@@ -18,7 +18,7 @@ pub(crate) enum Token {
     Ident(String),
 }
 
-pub(crate) fn tokenize(inp: &str) -> Vec<Token> {
+pub(crate) fn tokenize(inp: &str) -> Result<Vec<Token>, String> {
     let inp = inp.chars().collect::<Vec<_>>();
     let mut tokens = Vec::new();
     let mut stack = Vec::new();
@@ -27,8 +27,8 @@ pub(crate) fn tokenize(inp: &str) -> Vec<Token> {
     while i < inp.len() {
         let c = inp[i];
         let token = match c {
-            '0'..'9' => Some(tokenize_num(&mut i, &mut stack, &inp)),
-            '"' => Some(tokenize_string(&mut i, &mut stack, &inp)),
+            '0'..'9' => Some(tokenize_num(&mut i, &mut stack, &inp)?),
+            '"' => Some(tokenize_string(&mut i, &mut stack, &inp)?),
             '(' => Some(Token::LeftPar),
             ')' => Some(Token::RightPar),
             '+' => Some(Token::Plus),
@@ -41,7 +41,7 @@ pub(crate) fn tokenize(inp: &str) -> Vec<Token> {
             ';' => Some(Token::SemiColon),
             '\n' => None,
             'a'..='z' | 'A'..='Z' => Some(tokenize_multi_char(&mut i, &mut stack, &inp)),
-            c => unimplemented!("Char: {}", c),
+            c => return Err(format!("Unimplemented char: {}", c)),
         };
         if let Some(token) = token {
             trace!("Pushing token: {:?}", token);
@@ -49,10 +49,10 @@ pub(crate) fn tokenize(inp: &str) -> Vec<Token> {
         }
         i += 1;
     }
-    tokens
+    Ok(tokens)
 }
 
-fn tokenize_num(i: &mut usize, stack: &mut Vec<char>, inp: &[char]) -> Token {
+fn tokenize_num(i: &mut usize, stack: &mut Vec<char>, inp: &[char]) -> Result<Token, String> {
     while *i < inp.len() && matches!(inp[*i], '0'..='9') {
         stack.push(inp[*i]);
         *i += 1;
@@ -61,25 +61,25 @@ fn tokenize_num(i: &mut usize, stack: &mut Vec<char>, inp: &[char]) -> Token {
         .iter()
         .collect::<String>()
         .parse()
-        .expect("Invalid number");
+        .map_err(|e| format!("Invalid number ({:?}): {}", stack, e))?;
     trace!("Tokenized num: {}", num);
     stack.clear();
     *i -= 1;
-    Token::NumLiteral(num)
+    Ok(Token::NumLiteral(num))
 }
 
-fn tokenize_string(i: &mut usize, stack: &mut Vec<char>, inp: &[char]) -> Token {
+fn tokenize_string(i: &mut usize, stack: &mut Vec<char>, inp: &[char]) -> Result<Token, String> {
     *i += 1;
     while *i < inp.len() && inp[*i] != '"' {
         stack.push(inp[*i]);
         *i += 1;
     }
     if *i == inp.len() {
-        panic!("Unterminated string literal");
+        return Err("Unterminated string literal".to_string());
     }
     let string = stack.iter().collect::<String>();
     stack.clear();
-    Token::StringLiteral(string)
+    Ok(Token::StringLiteral(string))
 }
 
 fn tokenize_multi_char(i: &mut usize, stack: &mut Vec<char>, inp: &[char]) -> Token {
@@ -109,9 +109,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_tokenize() {
+    fn test_tokenize() -> Result<(), String> {
         let inp = "yap(2 + 6 / 3)";
-        let tokens = tokenize(inp);
+        let tokens = tokenize(inp)?;
         assert_eq!(
             tokens,
             vec![
@@ -125,12 +125,13 @@ mod tests {
                 Token::RightPar
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn tokenize_semicolons() {
+    fn tokenize_semicolons() -> Result<(), String> {
         let inp = "2;5 / 3 + 4;4";
-        let tokens = tokenize(inp);
+        let tokens = tokenize(inp)?;
         assert_eq!(
             tokens,
             vec![
@@ -145,12 +146,13 @@ mod tests {
                 Token::NumLiteral(4)
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn tokenize_newline() {
+    fn tokenize_newline() -> Result<(), String> {
         let inp = "2\n5 / 3 + 4\n4";
-        let tokens = tokenize(inp);
+        let tokens = tokenize(inp)?;
         assert_eq!(
             tokens,
             vec![
@@ -163,12 +165,13 @@ mod tests {
                 Token::NumLiteral(4)
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn tokenize_variables() {
+    fn tokenize_variables() -> Result<(), String> {
         let inp: &str = "a=42;b=69";
-        let tokens = tokenize(inp);
+        let tokens = tokenize(inp)?;
         assert_eq!(
             tokens,
             vec![
@@ -181,5 +184,6 @@ mod tests {
                 Token::NumLiteral(69),
             ]
         );
+        Ok(())
     }
 }

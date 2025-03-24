@@ -40,7 +40,7 @@ impl Parser {
         Self { tokens, pos: 0 }
     }
 
-    pub(crate) fn parse(&mut self) -> Option<Expr> {
+    pub(crate) fn parse(&mut self) -> Result<Option<Expr>, String> {
         self.parse_expr()
     }
 
@@ -57,17 +57,22 @@ impl Parser {
     }
 
     #[instrument(level = "trace", skip_all)]
-    fn parse_expr(&mut self) -> Option<Expr> {
+    fn parse_expr(&mut self) -> Result<Option<Expr>, String> {
         trace!(
             "Parsing expr, tokens: {:?}",
             self.tokens.iter().skip(self.pos + 1).collect::<Vec<_>>()
         );
-        let expr = self.parse_assignment()?;
+
+        let expr = match self.parse_assignment() {
+            Ok(Some(expr)) => expr,
+            expr @ _ => return expr,
+        };
+
         trace!("Parsed expr: {:?}", expr);
         let mut block = vec![expr.clone()];
         while let Some(Token::SemiColon) = self.peek() {
             self.consume();
-            if let Some(expr) = self.parse_assignment() {
+            if let Ok(Some(expr)) = self.parse_assignment() {
                 trace!("Adding expr to block: {:?}", expr);
                 block.push(expr);
             } else {
@@ -75,20 +80,23 @@ impl Parser {
             }
         }
         if block.len() > 1 {
-            Some(Expr::Block(block))
+            Ok(Some(Expr::Block(block)))
         } else {
-            Some(expr)
+            Ok(Some(expr))
         }
     }
 
     #[instrument(level = "trace", skip_all)]
-    fn parse_assignment(&mut self) -> Option<Expr> {
+    fn parse_assignment(&mut self) -> Result<Option<Expr>, String> {
         let start = self.pos;
         if let Some(Token::Ident(var_name)) = self.consume() {
             if let Some(Token::Assign) = self.consume() {
-                let expr = self.parse_assignment()?;
+                let expr = match self.parse_assignment() {
+                    Ok(Some(expr)) => expr,
+                    expr @ _ => return expr,
+                };
                 trace!("Parsed assignment: {} = {:?}", var_name, expr);
-                return Some(Expr::Assignment(var_name, Box::new(expr)));
+                return Ok(Some(Expr::Assignment(var_name, Box::new(expr))));
             }
         }
         self.pos = start;
@@ -96,15 +104,22 @@ impl Parser {
     }
 
     #[instrument(level = "trace", skip_all)]
-    fn parse_add_sub(&mut self) -> Option<Expr> {
-        let mut left = self.parse_mult_div()?;
+    fn parse_add_sub(&mut self) -> Result<Option<Expr>, String> {
+        let mut left = match self.parse_mult_div() {
+            Ok(Some(expr)) => expr,
+            left @ _ => return left,
+        };
         trace!("Parsed: {:?}", left);
 
         while let Some(token) = self.peek() {
             match token {
                 Token::Plus | Token::Minus => {
                     self.consume();
-                    let right = self.parse_mult_div()?;
+                    let right = match self.parse_mult_div() {
+                        Ok(Some(expr)) => expr,
+                        expr @ _ => return expr,
+                    };
+
                     left = match token {
                         Token::Plus => Expr::Binary(BinaryOp::Add, Box::new(left), Box::new(right)),
                         Token::Minus => {
@@ -116,17 +131,24 @@ impl Parser {
                 _ => break,
             }
         }
-        Some(left)
+        Ok(Some(left))
     }
 
-    fn parse_mult_div(&mut self) -> Option<Expr> {
-        let mut left = self.parse_primary()?;
+    fn parse_mult_div(&mut self) -> Result<Option<Expr>, String> {
+        let mut left = match self.parse_primary() {
+            Ok(Some(expr)) => expr,
+            left @ _ => return left,
+        };
 
         while let Some(token) = self.peek() {
             match token {
                 Token::Mult | Token::Div => {
                     self.consume();
-                    let right = self.parse_primary()?;
+                    let right = match self.parse_primary() {
+                        Ok(Some(expr)) => expr,
+                        expr @ _ => return expr,
+                    };
+
                     left = match token {
                         Token::Mult => {
                             Expr::Binary(BinaryOp::Mult, Box::new(left), Box::new(right))
@@ -138,77 +160,102 @@ impl Parser {
                 _ => break,
             }
         }
-        Some(left)
+        Ok(Some(left))
     }
 
-    fn parse_primary(&mut self) -> Option<Expr> {
-        if let Some(expr) = self.parse_function() {
-            return Some(expr);
+    fn parse_primary(&mut self) -> Result<Option<Expr>, String> {
+        if let Ok(Some(expr)) = self.parse_function() {
+            return Ok(Some(expr));
         }
 
-        if let Some(expr) = self.parse_unary() {
-            return Some(expr);
+        if let Ok(Some(expr)) = self.parse_unary() {
+            return Ok(Some(expr));
         }
 
-        if let Some(expr) = self.parse_paren() {
-            return Some(expr);
+        if let Ok(Some(expr)) = self.parse_paren() {
+            return Ok(Some(expr));
         }
 
-        match self.consume()? {
-            Token::NumLiteral(n) => Some(Expr::NumLit(n)),
-            Token::StringLiteral(s) => Some(Expr::StringLit(s)),
-            Token::Ident(id) => Some(Expr::Identifier(id)),
-            token => panic!("Unexpected token: {:?}", token),
+        let expr = match self.consume() {
+            Some(expr) => expr,
+            None => return Ok(None),
+        };
+
+        match expr {
+            Token::NumLiteral(n) => Ok(Some(Expr::NumLit(n))),
+            Token::StringLiteral(s) => Ok(Some(Expr::StringLit(s))),
+            Token::Ident(id) => Ok(Some(Expr::Identifier(id))),
+            token => Err(format!("Unexpected token: {:?}", token)),
         }
     }
 
-    fn parse_function(&mut self) -> Option<Expr> {
+    fn parse_function(&mut self) -> Result<Option<Expr>, String> {
         let start = self.pos;
 
         if let Some(Token::Ident(fn_name)) = self.consume() {
             if let Some(Token::LeftPar) = self.consume() {
                 let mut args = Vec::new();
                 while self.peek() != Some(Token::RightPar) {
-                    let arg = self.parse_expr()?;
+                    let arg = match self.parse_expr() {
+                        Ok(Some(expr)) => expr,
+                        expr @ _ => return expr,
+                    };
+
                     args.push(arg);
                     if let Some(Token::Comma) = self.peek() {
                         self.consume();
                     }
                 }
                 if let Some(Token::RightPar) = self.consume() {
-                    return Some(Expr::Function(Token::Ident(fn_name), args));
+                    return Ok(Some(Expr::Function(Token::Ident(fn_name), args)));
                 }
-                panic!("Expected ')' after function arguments");
+                return Err("Expected ')' after function arguments".to_string());
             }
         }
         self.pos = start;
-        None
+        Ok(None)
     }
 
-    fn parse_unary(&mut self) -> Option<Expr> {
-        match self.peek()? {
+    fn parse_unary(&mut self) -> Result<Option<Expr>, String> {
+        let expr = match self.peek() {
+            Some(expr) => expr,
+            None => return Ok(None),
+        };
+
+        match expr {
             Token::Plus => {
                 self.consume();
-                let expr = self.parse_primary()?;
-                Some(Expr::Unary(UnaryOp::Plus, Box::new(expr)))
+                let expr = match self.parse_primary() {
+                    Ok(Some(expr)) => expr,
+                    expr @ _ => return expr,
+                };
+                Ok(Some(Expr::Unary(UnaryOp::Plus, Box::new(expr))))
             }
             Token::Minus => {
                 self.consume();
-                let expr = self.parse_primary()?;
-                Some(Expr::Unary(UnaryOp::Minus, Box::new(expr)))
+                let expr = match self.parse_primary() {
+                    Ok(Some(expr)) => expr,
+                    expr @ _ => return expr,
+                };
+                Ok(Some(Expr::Unary(UnaryOp::Minus, Box::new(expr))))
             }
-            _ => None,
+            _ => Ok(None),
         }
     }
 
-    fn parse_paren(&mut self) -> Option<Expr> {
-        match self.peek()? {
+    fn parse_paren(&mut self) -> Result<Option<Expr>, String> {
+        let expr = match self.peek() {
+            Some(expr) => expr,
+            None => return Ok(None),
+        };
+
+        match expr {
             Token::LeftPar => {
                 self.consume(); // consume '('
 
                 if let Some(Token::RightPar) = self.peek() {
                     self.consume(); // consume ')'
-                    return None;
+                    return Ok(None);
                 }
 
                 let expr = self.parse_expr();
@@ -217,7 +264,7 @@ impl Parser {
                 }
                 expr
             }
-            _ => None,
+            _ => Ok(None),
         }
     }
 }
@@ -230,7 +277,7 @@ mod tests {
     #[test]
     fn parse_single_expr() {
         let mut parser = Parser::new(vec![Token::NumLiteral(42)]);
-        let expr = parser.parse().unwrap();
+        let expr = parser.parse().unwrap().unwrap();
         assert_eq!(expr, Expr::NumLit(42));
     }
 
@@ -243,7 +290,7 @@ mod tests {
             Token::SemiColon,
             Token::NumLiteral(3),
         ]);
-        let expr = parser.parse().unwrap();
+        let expr = parser.parse().unwrap().unwrap();
         assert_eq!(
             expr,
             Expr::Block(vec![Expr::NumLit(1), Expr::NumLit(2), Expr::NumLit(3)])
@@ -257,7 +304,7 @@ mod tests {
             Token::Assign,
             Token::NumLiteral(42),
         ]);
-        let expr = parser.parse().unwrap();
+        let expr = parser.parse().unwrap().unwrap();
         assert_eq!(
             expr,
             Expr::Assignment("a".to_string(), Box::new(Expr::NumLit(42)))
@@ -273,7 +320,7 @@ mod tests {
             Token::SemiColon,
             Token::Ident("a".to_string()),
         ]);
-        let expr = parser.parse().unwrap();
+        let expr = parser.parse().unwrap().unwrap();
         assert_eq!(
             expr,
             Expr::Block(vec![
