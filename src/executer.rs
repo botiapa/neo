@@ -66,10 +66,14 @@ impl Context {
     }
 
     pub(crate) fn flush_stdout(&mut self) -> io::Result<()> {
+        if self.stdout.len() == 0 {
+            return Ok(());
+        }
         let mut l = stdout().lock();
         for s in self.stdout.drain(..) {
             l.write_all(s.as_bytes())?
         }
+        println!();
         Ok(())
     }
 }
