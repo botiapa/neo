@@ -12,7 +12,7 @@ pub(crate) enum Token {
     Div,
     True,
     False,
-    Equal,
+    Assign,
     Comma,
     SemiColon,
     Ident(String),
@@ -36,11 +36,11 @@ pub(crate) fn tokenize(inp: &str) -> Vec<Token> {
             '*' => Some(Token::Mult),
             '/' => Some(Token::Div),
             ' ' => None,
-            '=' => Some(Token::Equal),
+            '=' => Some(Token::Assign),
             ',' => Some(Token::Comma),
-            'a'..='z' | 'A'..='Z' => Some(tokenize_ident(&mut i, &mut stack, &inp)),
             ';' => Some(Token::SemiColon),
             '\n' => None,
+            'a'..='z' | 'A'..='Z' => Some(tokenize_multi_char(&mut i, &mut stack, &inp)),
             c => unimplemented!("Char: {}", c),
         };
         if let Some(token) = token {
@@ -82,7 +82,7 @@ fn tokenize_string(i: &mut usize, stack: &mut Vec<char>, inp: &[char]) -> Token 
     Token::StringLiteral(string)
 }
 
-fn tokenize_ident(i: &mut usize, stack: &mut Vec<char>, inp: &[char]) -> Token {
+fn tokenize_multi_char(i: &mut usize, stack: &mut Vec<char>, inp: &[char]) -> Token {
     while *i < inp.len() && matches!(inp[*i], 'a'..='z' | 'A'..='Z') {
         stack.push(inp[*i]);
         *i += 1;
@@ -90,10 +90,17 @@ fn tokenize_ident(i: &mut usize, stack: &mut Vec<char>, inp: &[char]) -> Token {
     let ident = stack.iter().collect::<String>();
     stack.clear();
     *i -= 1;
-    match ident.as_str() {
-        "true" => Token::True,
-        "false" => Token::False,
-        s => Token::Ident(s.to_string()),
+    built_in(&ident).unwrap_or(Token::Ident(ident))
+}
+
+fn built_in(s: &String) -> Option<Token> {
+    match s.to_lowercase().as_str() {
+        "true" => Some(Token::True),
+        "false" => Some(Token::False),
+        "ongod" => Some(Token::Assign),
+        "glowup" => Some(Token::Plus),
+        "glowdown" => Some(Token::Minus),
+        _ => None,
     }
 }
 
@@ -166,11 +173,11 @@ mod tests {
             tokens,
             vec![
                 Token::Ident("a".to_string()),
-                Token::Equal,
+                Token::Assign,
                 Token::NumLiteral(42),
                 Token::SemiColon,
                 Token::Ident("b".to_string()),
-                Token::Equal,
+                Token::Assign,
                 Token::NumLiteral(69),
             ]
         );

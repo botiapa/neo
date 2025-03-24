@@ -85,7 +85,7 @@ impl Parser {
     fn parse_assignment(&mut self) -> Option<Expr> {
         let start = self.pos;
         if let Some(Token::Ident(var_name)) = self.consume() {
-            if let Some(Token::Equal) = self.consume() {
+            if let Some(Token::Assign) = self.consume() {
                 let expr = self.parse_assignment()?;
                 trace!("Parsed assignment: {} = {:?}", var_name, expr);
                 return Some(Expr::Assignment(var_name, Box::new(expr)));
@@ -254,7 +254,7 @@ mod tests {
     fn parse_assignment() {
         let mut parser = Parser::new(vec![
             Token::Ident("a".to_string()),
-            Token::Equal,
+            Token::Assign,
             Token::NumLiteral(42),
         ]);
         let expr = parser.parse().unwrap();
@@ -268,7 +268,7 @@ mod tests {
     fn parse_assignment_usage() {
         let mut parser = Parser::new(vec![
             Token::Ident("a".to_string()),
-            Token::Equal,
+            Token::Assign,
             Token::NumLiteral(42),
             Token::SemiColon,
             Token::Ident("a".to_string()),
