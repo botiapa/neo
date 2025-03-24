@@ -20,6 +20,7 @@ pub(crate) enum BinaryOp {
 pub(crate) enum Expr {
     NumLit(i32),
     StringLit(String),
+    BoolLit(bool),
     Identifier(String),
     Unary(UnaryOp, Box<Expr>),
     Binary(BinaryOp, Box<Expr>, Box<Expr>),
@@ -184,6 +185,7 @@ impl Parser {
         match expr {
             Token::NumLiteral(n) => Ok(Some(Expr::NumLit(n))),
             Token::StringLiteral(s) => Ok(Some(Expr::StringLit(s))),
+            Token::BoolLiteral(b) => Ok(Some(Expr::BoolLit(b))),
             Token::Ident(id) => Ok(Some(Expr::Identifier(id))),
             token => Err(format!("Unexpected token: {:?}", token)),
         }

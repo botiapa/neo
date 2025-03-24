@@ -4,14 +4,13 @@ use tracing::trace;
 pub(crate) enum Token {
     NumLiteral(i32),
     StringLiteral(String),
+    BoolLiteral(bool),
     Plus,
     Minus,
     LeftPar,
     RightPar,
     Mult,
     Div,
-    True,
-    False,
     Assign,
     Comma,
     SemiColon,
@@ -95,8 +94,8 @@ fn tokenize_multi_char(i: &mut usize, stack: &mut Vec<char>, inp: &[char]) -> To
 
 fn built_in(s: &String) -> Option<Token> {
     match s.to_lowercase().as_str() {
-        "true" => Some(Token::True),
-        "false" => Some(Token::False),
+        "true" => Some(Token::BoolLiteral(true)),
+        "false" => Some(Token::BoolLiteral(false)),
         "ongod" => Some(Token::Assign),
         "glowup" => Some(Token::Plus),
         "glowdown" => Some(Token::Minus),

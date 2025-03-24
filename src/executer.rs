@@ -94,7 +94,7 @@ pub(crate) fn interpret(c: &mut Context, expr: Expr) -> Result<Expr, String> {
             }
             Ok(last)
         }
-        Expr::NumLit(_) | Expr::StringLit(_) => Ok(expr),
+        Expr::NumLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => Ok(expr),
         Expr::Identifier(var_name) => c
             .get_var(&var_name)
             .ok_or(format!("variable({}) not set", var_name)),
@@ -148,39 +148,51 @@ fn yap(c: &mut Context, output: &Expr) -> Result<Expr, String> {
 
 fn binary_op(
     c: &mut Context,
-    op: fn(Expr, Expr) -> Expr,
+    op: fn(Expr, Expr) -> Result<Expr, String>,
     a: Expr,
     b: Expr,
 ) -> Result<Expr, String> {
     let a = expect_numlit(c, a)?;
     let b = expect_numlit(c, b)?;
-    Ok(op(a, b))
+    op(a, b)
 }
 
-fn add(a: Expr, b: Expr) -> Expr {
+fn add(a: Expr, b: Expr) -> Result<Expr, String> {
     if let (Expr::NumLit(a), Expr::NumLit(b)) = (&a, &b) {
-        return Expr::NumLit(a + b).into();
+        return Ok(Expr::NumLit(a + b).into());
     }
-    panic!("Invalid addition, expected numbers, got {:?}", (a, b));
+    Err(format!(
+        "Invalid addition, expected numbers, got {:?}",
+        (a, b)
+    ))
 }
 
-fn sub(a: Expr, b: Expr) -> Expr {
+fn sub(a: Expr, b: Expr) -> Result<Expr, String> {
     if let (Expr::NumLit(a), Expr::NumLit(b)) = (&a, &b) {
-        return Expr::NumLit(a - b).into();
+        return Ok(Expr::NumLit(a - b).into());
     }
-    panic!("Invalid subtraction, expected numbers, got {:?}", (a, b));
+    Err(format!(
+        "Invalid subtraction, expected numbers, got {:?}",
+        (a, b)
+    ))
 }
 
-fn mult(a: Expr, b: Expr) -> Expr {
+fn mult(a: Expr, b: Expr) -> Result<Expr, String> {
     if let (Expr::NumLit(a), Expr::NumLit(b)) = (&a, &b) {
-        return Expr::NumLit(a * b).into();
+        return Ok(Expr::NumLit(a * b).into());
     }
-    panic!("Invalid multiplication, expected numbers, got {:?}", (a, b));
+    Err(format!(
+        "Invalid multiplication, expected numbers, got {:?}",
+        (a, b)
+    ))
 }
 
-fn div(a: Expr, b: Expr) -> Expr {
+fn div(a: Expr, b: Expr) -> Result<Expr, String> {
     if let (Expr::NumLit(a), Expr::NumLit(b)) = (&a, &b) {
-        return Expr::NumLit(a / b).into();
+        return Ok(Expr::NumLit(a / b).into());
     }
-    panic!("Invalid division, expected numbers, got {:?}", (a, b));
+    Err(format!(
+        "Invalid division, expected numbers, got {:?}",
+        (a, b)
+    ))
 }
