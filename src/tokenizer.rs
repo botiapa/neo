@@ -1,3 +1,5 @@
+use tracing::trace;
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Token {
     NumLiteral(i32),
@@ -39,9 +41,10 @@ pub(crate) fn tokenize(inp: &str) -> Vec<Token> {
             'a'..='z' | 'A'..='Z' => Some(tokenize_ident(&mut i, &mut stack, &inp)),
             ';' => Some(Token::SemiColon),
             '\n' => None,
-            _ => unimplemented!(),
+            c => unimplemented!("Char: {}", c),
         };
         if let Some(token) = token {
+            trace!("Pushing token: {:?}", token);
             tokens.push(token);
         }
         i += 1;
@@ -50,7 +53,7 @@ pub(crate) fn tokenize(inp: &str) -> Vec<Token> {
 }
 
 fn tokenize_num(i: &mut usize, stack: &mut Vec<char>, inp: &[char]) -> Token {
-    while *i < inp.len() && matches!(inp[*i], '0'..'9') {
+    while *i < inp.len() && matches!(inp[*i], '0'..='9') {
         stack.push(inp[*i]);
         *i += 1;
     }
@@ -59,6 +62,7 @@ fn tokenize_num(i: &mut usize, stack: &mut Vec<char>, inp: &[char]) -> Token {
         .collect::<String>()
         .parse()
         .expect("Invalid number");
+    trace!("Tokenized num: {}", num);
     stack.clear();
     *i -= 1;
     Token::NumLiteral(num)
@@ -150,6 +154,24 @@ mod tests {
                 Token::Plus,
                 Token::NumLiteral(4),
                 Token::NumLiteral(4)
+            ]
+        );
+    }
+
+    #[test]
+    fn tokenize_variables() {
+        let inp: &str = "a=42;b=69";
+        let tokens = tokenize(inp);
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Ident("a".to_string()),
+                Token::Equal,
+                Token::NumLiteral(42),
+                Token::SemiColon,
+                Token::Ident("b".to_string()),
+                Token::Equal,
+                Token::NumLiteral(69),
             ]
         );
     }

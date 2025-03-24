@@ -1,3 +1,5 @@
+use tracing::{instrument, trace};
+
 use crate::tokenizer::Token;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -18,13 +20,16 @@ pub(crate) enum BinaryOp {
 pub(crate) enum Expr {
     NumLit(i32),
     StringLit(String),
+    Identifier(String),
     Unary(UnaryOp, Box<Expr>),
     Binary(BinaryOp, Box<Expr>, Box<Expr>),
     Function(Token, Vec<Expr>),
     Block(Vec<Expr>),
+    Assignment(String, Box<Expr>),
     NoOp,
 }
 
+#[derive(Debug)]
 pub(crate) struct Parser {
     tokens: Vec<Token>,
     pos: usize,
@@ -51,15 +56,22 @@ impl Parser {
         token
     }
 
+    #[instrument(level = "trace", skip_all)]
     fn parse_expr(&mut self) -> Option<Expr> {
-        let expr = self.parse_add_sub()?;
+        trace!(
+            "Parsing expr, tokens: {:?}",
+            self.tokens.iter().skip(self.pos + 1).collect::<Vec<_>>()
+        );
+        let expr = self.parse_assignment()?;
+        trace!("Parsed expr: {:?}", expr);
         let mut block = vec![expr.clone()];
         while let Some(Token::SemiColon) = self.peek() {
             self.consume();
-            if let Some(expr) = self.parse_add_sub() {
+            if let Some(expr) = self.parse_assignment() {
+                trace!("Adding expr to block: {:?}", expr);
                 block.push(expr);
             } else {
-                return Some(Expr::Block(block));
+                break;
             }
         }
         if block.len() > 1 {
@@ -69,8 +81,24 @@ impl Parser {
         }
     }
 
+    #[instrument(level = "trace", skip_all)]
+    fn parse_assignment(&mut self) -> Option<Expr> {
+        let start = self.pos;
+        if let Some(Token::Ident(var_name)) = self.consume() {
+            if let Some(Token::Equal) = self.consume() {
+                let expr = self.parse_assignment()?;
+                trace!("Parsed assignment: {} = {:?}", var_name, expr);
+                return Some(Expr::Assignment(var_name, Box::new(expr)));
+            }
+        }
+        self.pos = start;
+        self.parse_add_sub()
+    }
+
+    #[instrument(level = "trace", skip_all)]
     fn parse_add_sub(&mut self) -> Option<Expr> {
         let mut left = self.parse_mult_div()?;
+        trace!("Parsed: {:?}", left);
 
         while let Some(token) = self.peek() {
             match token {
@@ -129,6 +157,7 @@ impl Parser {
         match self.consume()? {
             Token::NumLiteral(n) => Some(Expr::NumLit(n)),
             Token::StringLiteral(s) => Some(Expr::StringLit(s)),
+            Token::Ident(id) => Some(Expr::Identifier(id)),
             token => panic!("Unexpected token: {:?}", token),
         }
     }
@@ -196,29 +225,60 @@ impl Parser {
 #[cfg(test)]
 mod tests {
 
+    use super::{Expr, Parser, Token};
+
     #[test]
     fn parse_single_expr() {
-        let mut parser = super::Parser::new(vec![super::Token::NumLiteral(42)]);
+        let mut parser = Parser::new(vec![Token::NumLiteral(42)]);
         let expr = parser.parse().unwrap();
-        assert_eq!(expr, super::Expr::NumLit(42));
+        assert_eq!(expr, Expr::NumLit(42));
     }
 
     #[test]
     fn parse_block() {
-        let mut parser = super::Parser::new(vec![
-            super::Token::NumLiteral(1),
-            super::Token::SemiColon,
-            super::Token::NumLiteral(2),
-            super::Token::SemiColon,
-            super::Token::NumLiteral(3),
+        let mut parser = Parser::new(vec![
+            Token::NumLiteral(1),
+            Token::SemiColon,
+            Token::NumLiteral(2),
+            Token::SemiColon,
+            Token::NumLiteral(3),
         ]);
         let expr = parser.parse().unwrap();
         assert_eq!(
             expr,
-            super::Expr::Block(vec![
-                super::Expr::NumLit(1),
-                super::Expr::NumLit(2),
-                super::Expr::NumLit(3)
+            Expr::Block(vec![Expr::NumLit(1), Expr::NumLit(2), Expr::NumLit(3)])
+        );
+    }
+
+    #[test]
+    fn parse_assignment() {
+        let mut parser = Parser::new(vec![
+            Token::Ident("a".to_string()),
+            Token::Equal,
+            Token::NumLiteral(42),
+        ]);
+        let expr = parser.parse().unwrap();
+        assert_eq!(
+            expr,
+            Expr::Assignment("a".to_string(), Box::new(Expr::NumLit(42)))
+        );
+    }
+
+    #[test]
+    fn parse_assignment_usage() {
+        let mut parser = Parser::new(vec![
+            Token::Ident("a".to_string()),
+            Token::Equal,
+            Token::NumLiteral(42),
+            Token::SemiColon,
+            Token::Ident("a".to_string()),
+        ]);
+        let expr = parser.parse().unwrap();
+        assert_eq!(
+            expr,
+            Expr::Block(vec![
+                Expr::Assignment("a".to_string(), Box::new(Expr::NumLit(42))),
+                Expr::Identifier("a".to_string())
             ])
         );
     }
