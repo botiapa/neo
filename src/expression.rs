@@ -1,12 +1,12 @@
 use crate::tokenizer::Token;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum UnaryOp {
     Plus,
     Minus,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum BinaryOp {
     Add,
     Sub,
@@ -14,13 +14,14 @@ pub(crate) enum BinaryOp {
     Div,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Expr {
     NumLit(i32),
     StringLit(String),
     Unary(UnaryOp, Box<Expr>),
     Binary(BinaryOp, Box<Expr>, Box<Expr>),
     Function(Token, Vec<Expr>),
+    Block(Vec<Expr>),
     NoOp,
 }
 
@@ -51,7 +52,21 @@ impl Parser {
     }
 
     fn parse_expr(&mut self) -> Option<Expr> {
-        self.parse_add_sub()
+        let expr = self.parse_add_sub()?;
+        let mut block = vec![expr.clone()];
+        while let Some(Token::SemiColon) = self.peek() {
+            self.consume();
+            if let Some(expr) = self.parse_add_sub() {
+                block.push(expr);
+            } else {
+                return Some(Expr::Block(block));
+            }
+        }
+        if block.len() > 1 {
+            Some(Expr::Block(block))
+        } else {
+            Some(expr)
+        }
     }
 
     fn parse_add_sub(&mut self) -> Option<Expr> {
@@ -175,5 +190,36 @@ impl Parser {
             }
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn parse_single_expr() {
+        let mut parser = super::Parser::new(vec![super::Token::NumLiteral(42)]);
+        let expr = parser.parse().unwrap();
+        assert_eq!(expr, super::Expr::NumLit(42));
+    }
+
+    #[test]
+    fn parse_block() {
+        let mut parser = super::Parser::new(vec![
+            super::Token::NumLiteral(1),
+            super::Token::SemiColon,
+            super::Token::NumLiteral(2),
+            super::Token::SemiColon,
+            super::Token::NumLiteral(3),
+        ]);
+        let expr = parser.parse().unwrap();
+        assert_eq!(
+            expr,
+            super::Expr::Block(vec![
+                super::Expr::NumLit(1),
+                super::Expr::NumLit(2),
+                super::Expr::NumLit(3)
+            ])
+        );
     }
 }

@@ -7,7 +7,7 @@ mod expression;
 mod tokenizer;
 
 fn main() {
-    let inp = "yap(2 + 6 / 3)";
+    let inp = "yap(\"Ligma: \");\nyap(2 + 6 / 3)";
     println!("Input: {}", inp);
 
     let tokens = tokenize(inp);
@@ -18,5 +18,5 @@ fn main() {
     println!("Expressions: {:?}", expr);
 
     let res = execute(expr);
-    println!("Result: {:?}", res);
+    println!("\nResult: {:?}", res);
 }

@@ -11,9 +11,22 @@ pub(crate) fn execute(expr: Expr) -> Expr {
             BinaryOp::Mult => binary_op(mult, *a, *b),
             BinaryOp::Div => binary_op(div, *a, *b),
         },
-        Expr::Function(Token::Ident(ind), args) if ind == "yap" => {
-            yap(args.get(0).expect("Expected argument"))
+        Expr::Function(Token::Ident(fn_name), args) => execute_base_function(&fn_name, args),
+        Expr::Block(expressions) => {
+            let mut last = Expr::NoOp;
+            for expr in expressions {
+                last = execute(expr);
+            }
+            last
         }
+        Expr::NumLit(_) | Expr::StringLit(_) => expr,
+        block => unimplemented!("{:?}", block),
+    }
+}
+
+fn execute_base_function(name: &str, args: Vec<Expr>) -> Expr {
+    match name {
+        "yap" => yap(args.get(0).expect("Expected argument")),
         _ => unimplemented!(),
     }
 }
@@ -32,14 +45,14 @@ fn expect_literal(expr: Expr) -> Expr {
     }
 }
 
-fn yap(a: &Expr) -> Expr {
-    let arg = expect_literal(a.clone());
+fn yap(output: &Expr) -> Expr {
+    let arg = expect_literal(output.clone());
     let s = match arg {
         Expr::NumLit(a) => a.to_string(),
         Expr::StringLit(s) => s,
         _ => panic!("Invalid argument, expected number or string, got {:?}", arg),
     };
-    println!("Yap: {}", s);
+    print!("{}", s);
     Expr::NoOp
 }
 

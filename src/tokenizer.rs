@@ -12,6 +12,7 @@ pub(crate) enum Token {
     False,
     Equal,
     Comma,
+    SemiColon,
     Ident(String),
 }
 
@@ -36,6 +37,8 @@ pub(crate) fn tokenize(inp: &str) -> Vec<Token> {
             '=' => Some(Token::Equal),
             ',' => Some(Token::Comma),
             'a'..='z' | 'A'..='Z' => Some(tokenize_ident(&mut i, &mut stack, &inp)),
+            ';' => Some(Token::SemiColon),
+            '\n' => None,
             _ => unimplemented!(),
         };
         if let Some(token) = token {
@@ -87,5 +90,67 @@ fn tokenize_ident(i: &mut usize, stack: &mut Vec<char>, inp: &[char]) -> Token {
         "true" => Token::True,
         "false" => Token::False,
         s => Token::Ident(s.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tokenize() {
+        let inp = "yap(2 + 6 / 3)";
+        let tokens = tokenize(inp);
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Ident("yap".to_string()),
+                Token::LeftPar,
+                Token::NumLiteral(2),
+                Token::Plus,
+                Token::NumLiteral(6),
+                Token::Div,
+                Token::NumLiteral(3),
+                Token::RightPar
+            ]
+        );
+    }
+
+    #[test]
+    fn tokenize_semicolons() {
+        let inp = "2;5 / 3 + 4;4";
+        let tokens = tokenize(inp);
+        assert_eq!(
+            tokens,
+            vec![
+                Token::NumLiteral(2),
+                Token::SemiColon,
+                Token::NumLiteral(5),
+                Token::Div,
+                Token::NumLiteral(3),
+                Token::Plus,
+                Token::NumLiteral(4),
+                Token::SemiColon,
+                Token::NumLiteral(4)
+            ]
+        );
+    }
+
+    #[test]
+    fn tokenize_newline() {
+        let inp = "2\n5 / 3 + 4\n4";
+        let tokens = tokenize(inp);
+        assert_eq!(
+            tokens,
+            vec![
+                Token::NumLiteral(2),
+                Token::NumLiteral(5),
+                Token::Div,
+                Token::NumLiteral(3),
+                Token::Plus,
+                Token::NumLiteral(4),
+                Token::NumLiteral(4)
+            ]
+        );
     }
 }
