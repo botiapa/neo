@@ -6,7 +6,7 @@ use std::{
 use tracing::trace;
 
 use crate::{
-    expression::{BinaryOp, Expr},
+    expression::{BinaryOp, Expr, UnaryOp},
     tokenizer::Token,
 };
 
@@ -81,6 +81,10 @@ impl Context {
 pub(crate) fn interpret(c: &mut Context, expr: Expr) -> Result<Expr, String> {
     trace!("Interpreting: {:?}, context: {:?}", expr, c);
     match expr {
+        Expr::Unary(op, a) => match op {
+            UnaryOp::Plus => interpret(c, *a),
+            UnaryOp::Minus => binary_num_op(c, i32::saturating_sub, Expr::NumLit(0), *a),
+        },
         Expr::Binary(op, a, b) => match op {
             BinaryOp::Add => binary_num_op(c, i32::saturating_add, *a, *b),
             BinaryOp::Sub => binary_num_op(c, i32::saturating_sub, *a, *b),
@@ -103,7 +107,34 @@ pub(crate) fn interpret(c: &mut Context, expr: Expr) -> Result<Expr, String> {
         Expr::NumLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => Ok(expr),
         Expr::Identifier(var_name) => interpret_identifier(c, var_name),
         Expr::Assignment(var_name, value) => interpret_assignment(c, var_name, *value),
+        Expr::If(cond, then, else_) => interpret_if(c, *cond, *then, else_.map(|e| *e)),
         expr => unimplemented!("{:?}", expr),
+    }
+}
+
+fn interpret_if(
+    c: &mut Context,
+    cond: Expr,
+    then: Expr,
+    else_: Option<Expr>,
+) -> Result<Expr, String> {
+    let cond = match expect_boollit(c, cond)? {
+        Expr::BoolLit(b) => b,
+        cond => return Err(format!("Expected a boolean, got {:?}", cond)),
+    };
+
+    trace!(
+        "Interpreting if: {:?}, then: {:?}, else: {:?}",
+        cond, then, else_
+    );
+    if cond {
+        interpret(c, then)
+    } else {
+        if let Some(else_) = else_ {
+            interpret(c, else_)
+        } else {
+            Ok(Expr::NoOp)
+        }
     }
 }
 
@@ -135,9 +166,16 @@ fn expect_numlit(c: &mut Context, expr: Expr) -> Result<Expr, String> {
     }
 }
 
+fn expect_boollit(c: &mut Context, expr: Expr) -> Result<Expr, String> {
+    match expr {
+        Expr::BoolLit(_) => Ok(expr),
+        _ => interpret(c, expr),
+    }
+}
+
 fn expect_literal(c: &mut Context, expr: Expr) -> Result<Expr, String> {
     match expr {
-        Expr::NumLit(_) | Expr::StringLit(_) => Ok(expr),
+        Expr::NumLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => Ok(expr),
         _ => interpret(c, expr),
     }
 }
@@ -270,6 +308,36 @@ mod tests {
         assert_eq!(res, Expr::NumLit(1));
         assert_eq!(c.get_var("a"), Some(Expr::NumLit(1)));
         assert_eq!(c.get_var("b"), Some(Expr::NumLit(1)));
+        Ok(())
+    }
+
+    #[test]
+    fn if_expr() -> Result<(), String> {
+        let mut c = Context::new();
+        let res = interpret(
+            &mut c,
+            Expr::If(
+                Box::new(Expr::BoolLit(true)),
+                Box::new(Expr::NumLit(1)),
+                None,
+            ),
+        )?;
+        assert_eq!(res, Expr::NumLit(1));
+        Ok(())
+    }
+
+    #[test]
+    fn if_else_expr() -> Result<(), String> {
+        let mut c = Context::new();
+        let res = interpret(
+            &mut c,
+            Expr::If(
+                Box::new(Expr::BoolLit(false)),
+                Box::new(Expr::NumLit(1)),
+                Some(Box::new(Expr::NumLit(2))),
+            ),
+        )?;
+        assert_eq!(res, Expr::NumLit(2));
         Ok(())
     }
 }

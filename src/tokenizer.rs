@@ -19,6 +19,10 @@ pub(crate) enum Token {
     LessThan,
     LessOrEqualThan,
     Equal,
+    OpenCurly,
+    CloseCurly,
+    If,
+    Else,
     Ident(String),
 }
 
@@ -42,6 +46,8 @@ pub(crate) fn tokenize(inp: &str) -> Result<Vec<Token>, String> {
             ' ' => None,
             ',' => Some(Token::Comma),
             ';' => Some(Token::SemiColon),
+            '{' => Some(Token::OpenCurly),
+            '}' => Some(Token::CloseCurly),
             '=' | '<' | '>' => Some(tokenize_comp(&mut i, &mut stack, &inp)?),
             '\n' => None,
             'a'..='z' | 'A'..='Z' => Some(tokenize_multi_char(&mut i, &mut stack, &inp)),
@@ -135,6 +141,8 @@ fn built_in(s: &String) -> Option<Token> {
         ">=" => Some(Token::GreaterOrEqualThan),
         "<=" => Some(Token::LessOrEqualThan),
         "==" => Some(Token::Equal),
+        "if" => Some(Token::If),
+        "else" => Some(Token::Else),
         _ => None,
     }
 }
@@ -254,5 +262,67 @@ mod tests {
                 Token::Ident("b".to_string()),
             ]
         );
+    }
+
+    #[test]
+    fn tokenize_if_with_else() {
+        let inp = "if a > b { a = 42; } else { b = 69; }";
+        let tokens = tokenize(inp).unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::If,
+                Token::Ident("a".to_string()),
+                Token::GreaterThan,
+                Token::Ident("b".to_string()),
+                Token::OpenCurly,
+                Token::Ident("a".to_string()),
+                Token::Assign,
+                Token::NumLiteral(42),
+                Token::SemiColon,
+                Token::CloseCurly,
+                Token::Else,
+                Token::OpenCurly,
+                Token::Ident("b".to_string()),
+                Token::Assign,
+                Token::NumLiteral(69),
+                Token::SemiColon,
+                Token::CloseCurly,
+            ]
+        );
+    }
+
+    #[test]
+    fn if_else_if() -> Result<(), String> {
+        let inp = "if a > b { 42; } else if a < b { 69; } else { 420; }";
+        let tokens = tokenize(inp).unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::If,
+                Token::Ident("a".to_string()),
+                Token::GreaterThan,
+                Token::Ident("b".to_string()),
+                Token::OpenCurly,
+                Token::NumLiteral(42),
+                Token::SemiColon,
+                Token::CloseCurly,
+                Token::Else,
+                Token::If,
+                Token::Ident("a".to_string()),
+                Token::LessThan,
+                Token::Ident("b".to_string()),
+                Token::OpenCurly,
+                Token::NumLiteral(69),
+                Token::SemiColon,
+                Token::CloseCurly,
+                Token::Else,
+                Token::OpenCurly,
+                Token::NumLiteral(420),
+                Token::SemiColon,
+                Token::CloseCurly,
+            ]
+        );
+        Ok(())
     }
 }
