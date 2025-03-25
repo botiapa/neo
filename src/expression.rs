@@ -109,6 +109,18 @@ impl Parser {
         self.parse_comp()
     }
 
+    #[inline]
+    fn peek_comp(&self) -> Option<Token> {
+        match self.peek() {
+            Some(Token::GreaterThan) => Some(Token::GreaterThan),
+            Some(Token::GreaterOrEqualThan) => Some(Token::GreaterOrEqualThan),
+            Some(Token::LessThan) => Some(Token::LessThan),
+            Some(Token::LessOrEqualThan) => Some(Token::LessOrEqualThan),
+            Some(Token::Equal) => Some(Token::Equal),
+            _ => None,
+        }
+    }
+
     #[instrument(level = "trace", skip_all)]
     fn parse_comp(&mut self) -> Result<Option<Expr>, String> {
         let mut left = match self.parse_add_sub() {
@@ -117,42 +129,31 @@ impl Parser {
         };
         trace!("Parsed: {:?}", left);
 
-        if let Some(token) = self.peek() {
-            match token {
-                Token::GreaterThan
-                | Token::GreaterOrEqualThan
-                | Token::LessThan
-                | Token::LessOrEqualThan
-                | Token::Equal => {
-                    self.consume();
-                    let right = match self.parse_add_sub() {
-                        Ok(Some(expr)) => expr,
-                        expr @ _ => return expr,
-                    };
+        if let Some(token) = self.peek_comp() {
+            self.consume();
+            let right = match self.parse_add_sub() {
+                Ok(Some(expr)) => expr,
+                expr @ _ => return expr,
+            };
 
-                    left = match token {
-                        Token::GreaterThan => {
-                            Expr::Binary(BinaryOp::GreaterThan, Box::new(left), Box::new(right))
-                        }
-                        Token::GreaterOrEqualThan => Expr::Binary(
-                            BinaryOp::GreaterOrEqualThan,
-                            Box::new(left),
-                            Box::new(right),
-                        ),
-                        Token::LessThan => {
-                            Expr::Binary(BinaryOp::LessThan, Box::new(left), Box::new(right))
-                        }
-                        Token::LessOrEqualThan => {
-                            Expr::Binary(BinaryOp::LessOrEqualThan, Box::new(left), Box::new(right))
-                        }
-                        Token::Equal => {
-                            Expr::Binary(BinaryOp::Equal, Box::new(left), Box::new(right))
-                        }
-                        _ => unreachable!(),
-                    };
+            left = match token {
+                Token::GreaterThan => {
+                    Expr::Binary(BinaryOp::GreaterThan, Box::new(left), Box::new(right))
                 }
-                _ => {}
-            }
+                Token::GreaterOrEqualThan => Expr::Binary(
+                    BinaryOp::GreaterOrEqualThan,
+                    Box::new(left),
+                    Box::new(right),
+                ),
+                Token::LessThan => {
+                    Expr::Binary(BinaryOp::LessThan, Box::new(left), Box::new(right))
+                }
+                Token::LessOrEqualThan => {
+                    Expr::Binary(BinaryOp::LessOrEqualThan, Box::new(left), Box::new(right))
+                }
+                Token::Equal => Expr::Binary(BinaryOp::Equal, Box::new(left), Box::new(right)),
+                _ => unreachable!(),
+            };
         }
         Ok(Some(left))
     }
