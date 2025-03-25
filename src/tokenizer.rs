@@ -43,7 +43,13 @@ pub(crate) fn tokenize(inp: &str) -> Result<Vec<Token>, String> {
             '+' => Some(Token::Plus),
             '-' => Some(Token::Minus),
             '*' => Some(Token::Mult),
-            '/' => Some(Token::Div),
+            '/' => {
+                if let Some('/') = inp.get(i + 1) {
+                    tokenize_comment(&mut i, &inp)?;
+                    continue;
+                }
+                Some(Token::Div)
+            }
             ' ' => None,
             ',' => Some(Token::Comma),
             ';' => Some(Token::SemiColon),
@@ -62,6 +68,13 @@ pub(crate) fn tokenize(inp: &str) -> Result<Vec<Token>, String> {
     }
     trace!("Tokens: {:?}", tokens);
     Ok(tokens)
+}
+
+fn tokenize_comment(i: &mut usize, inp: &[char]) -> Result<(), String> {
+    while *i < inp.len() && inp[*i] != '\n' {
+        *i += 1;
+    }
+    Ok(())
 }
 
 fn tokenize_comp(i: &mut usize, _: &mut Vec<char>, inp: &[char]) -> Result<Token, String> {
@@ -368,6 +381,14 @@ mod tests {
                 Token::CloseCurly,
             ]
         );
+        Ok(())
+    }
+
+    #[test]
+    fn tokenize_comment() -> Result<(), String> {
+        let inp = "//This is a comment \n 42";
+        let tokens = tokenize(inp)?;
+        assert_eq!(tokens, vec![Token::NumLiteral(42)]);
         Ok(())
     }
 }

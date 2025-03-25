@@ -4,6 +4,7 @@ b onGod 69;
 yap(if a > b {a} else if a < b {b} else {a glowUp b})
 yap(" ")
 
+// this a bussing comment 
 c = 2
 i = 0
 yap(while i < 3 { i = i + 1; c = c * c; })
