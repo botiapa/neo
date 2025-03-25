@@ -38,19 +38,25 @@ fn interactive_mode() {
         if let Ok(line) = line {
             if let Ok(tokens) = tokenize(&line) {
                 let mut parser = Parser::new(tokens);
-                if let Ok(Some(expr)) = parser.parse() {
-                    let res = interpret(&mut context, expr);
-                    match res {
-                        Ok(res) => {
-                            context.flush_stdout().expect("Failed writing to stdout");
-                            println!("Result: {:?}", res);
-                        }
-                        Err(err) => {
-                            println!("Failed interpreting: {}", err)
+                match parser.parse() {
+                    Ok(Some(expr)) => {
+                        let res = interpret(&mut context, expr);
+                        match res {
+                            Ok(res) => {
+                                context.flush_stdout().expect("Failed writing to stdout");
+                                println!("Result: {:?}", res);
+                            }
+                            Err(err) => {
+                                println!("Failed interpreting: {}", err)
+                            }
                         }
                     }
-                } else {
-                    println!("Failed parsing");
+                    Ok(None) => {
+                        println!();
+                    }
+                    Err(err) => {
+                        println!("Failed parsing: {}", err);
+                    }
                 }
             } else {
                 println!("Failed tokenizing");

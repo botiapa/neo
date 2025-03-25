@@ -14,6 +14,11 @@ pub(crate) enum BinaryOp {
     Sub,
     Mult,
     Div,
+    GreaterThan,
+    GreaterOrEqualThan,
+    LessThan,
+    LessOrEqualThan,
+    Equal,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -61,7 +66,7 @@ impl Parser {
     fn parse_expr(&mut self) -> Result<Option<Expr>, String> {
         trace!(
             "Parsing expr, tokens: {:?}",
-            self.tokens.iter().skip(self.pos + 1).collect::<Vec<_>>()
+            self.tokens.iter().skip(self.pos).collect::<Vec<_>>()
         );
 
         let expr = match self.parse_assignment() {
@@ -101,7 +106,55 @@ impl Parser {
             }
         }
         self.pos = start;
-        self.parse_add_sub()
+        self.parse_comp()
+    }
+
+    #[instrument(level = "trace", skip_all)]
+    fn parse_comp(&mut self) -> Result<Option<Expr>, String> {
+        let mut left = match self.parse_add_sub() {
+            Ok(Some(expr)) => expr,
+            left @ _ => return left,
+        };
+        trace!("Parsed: {:?}", left);
+
+        if let Some(token) = self.peek() {
+            match token {
+                Token::GreaterThan
+                | Token::GreaterOrEqualThan
+                | Token::LessThan
+                | Token::LessOrEqualThan
+                | Token::Equal => {
+                    self.consume();
+                    let right = match self.parse_add_sub() {
+                        Ok(Some(expr)) => expr,
+                        expr @ _ => return expr,
+                    };
+
+                    left = match token {
+                        Token::GreaterThan => {
+                            Expr::Binary(BinaryOp::GreaterThan, Box::new(left), Box::new(right))
+                        }
+                        Token::GreaterOrEqualThan => Expr::Binary(
+                            BinaryOp::GreaterOrEqualThan,
+                            Box::new(left),
+                            Box::new(right),
+                        ),
+                        Token::LessThan => {
+                            Expr::Binary(BinaryOp::LessThan, Box::new(left), Box::new(right))
+                        }
+                        Token::LessOrEqualThan => {
+                            Expr::Binary(BinaryOp::LessOrEqualThan, Box::new(left), Box::new(right))
+                        }
+                        Token::Equal => {
+                            Expr::Binary(BinaryOp::Equal, Box::new(left), Box::new(right))
+                        }
+                        _ => unreachable!(),
+                    };
+                }
+                _ => {}
+            }
+        }
+        Ok(Some(left))
     }
 
     #[instrument(level = "trace", skip_all)]
@@ -122,6 +175,23 @@ impl Parser {
                     };
 
                     left = match token {
+                        Token::GreaterThan => {
+                            Expr::Binary(BinaryOp::GreaterThan, Box::new(left), Box::new(right))
+                        }
+                        Token::GreaterOrEqualThan => Expr::Binary(
+                            BinaryOp::GreaterOrEqualThan,
+                            Box::new(left),
+                            Box::new(right),
+                        ),
+                        Token::LessThan => {
+                            Expr::Binary(BinaryOp::LessThan, Box::new(left), Box::new(right))
+                        }
+                        Token::LessOrEqualThan => {
+                            Expr::Binary(BinaryOp::LessOrEqualThan, Box::new(left), Box::new(right))
+                        }
+                        Token::Equal => {
+                            Expr::Binary(BinaryOp::Equal, Box::new(left), Box::new(right))
+                        }
                         Token::Plus => Expr::Binary(BinaryOp::Add, Box::new(left), Box::new(right)),
                         Token::Minus => {
                             Expr::Binary(BinaryOp::Sub, Box::new(left), Box::new(right))
@@ -274,6 +344,8 @@ impl Parser {
 #[cfg(test)]
 mod tests {
 
+    use crate::expression::BinaryOp;
+
     use super::{Expr, Parser, Token};
 
     #[test]
@@ -329,6 +401,54 @@ mod tests {
                 Expr::Assignment("a".to_string(), Box::new(Expr::NumLit(42))),
                 Expr::Identifier("a".to_string())
             ])
+        );
+    }
+
+    #[test]
+    fn parse_eq() {
+        let mut parser = Parser::new(vec![
+            Token::NumLiteral(1),
+            Token::Equal,
+            Token::NumLiteral(2),
+        ]);
+        let expr = parser.parse().unwrap().unwrap();
+        assert_eq!(
+            expr,
+            Expr::Binary(
+                super::BinaryOp::Equal,
+                Box::new(Expr::NumLit(1)),
+                Box::new(Expr::NumLit(2))
+            )
+        );
+    }
+
+    #[test]
+    fn comp_precedence() {
+        let mut parser = Parser::new(vec![
+            Token::NumLiteral(1),
+            Token::Plus,
+            Token::NumLiteral(1),
+            Token::Equal,
+            Token::NumLiteral(1),
+            Token::Plus,
+            Token::NumLiteral(1),
+        ]);
+        let expr = parser.parse().unwrap().unwrap();
+        assert_eq!(
+            expr,
+            Expr::Binary(
+                BinaryOp::Equal,
+                Box::new(Expr::Binary(
+                    super::BinaryOp::Add,
+                    Box::new(Expr::NumLit(1)),
+                    Box::new(Expr::NumLit(1))
+                )),
+                Box::new(Expr::Binary(
+                    super::BinaryOp::Add,
+                    Box::new(Expr::NumLit(1)),
+                    Box::new(Expr::NumLit(1))
+                )),
+            )
         );
     }
 }

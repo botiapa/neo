@@ -85,6 +85,11 @@ pub(crate) fn interpret(c: &mut Context, expr: Expr) -> Result<Expr, String> {
             BinaryOp::Sub => binary_op(c, sub, *a, *b),
             BinaryOp::Mult => binary_op(c, mult, *a, *b),
             BinaryOp::Div => binary_op(c, div, *a, *b),
+            BinaryOp::GreaterThan => binary_op(c, greater_than, *a, *b),
+            BinaryOp::GreaterOrEqualThan => binary_op(c, greater_equal_than, *a, *b),
+            BinaryOp::LessThan => binary_op(c, less_than, *a, *b),
+            BinaryOp::LessOrEqualThan => binary_op(c, less_equal_than, *a, *b),
+            BinaryOp::Equal => binary_op(c, equal, *a, *b),
         },
         Expr::Function(Token::Ident(fn_name), args) => execute_base_function(c, &fn_name, args),
         Expr::Block(expressions) => {
@@ -193,6 +198,56 @@ fn div(a: Expr, b: Expr) -> Result<Expr, String> {
     }
     Err(format!(
         "Invalid division, expected numbers, got {:?}",
+        (a, b)
+    ))
+}
+
+fn greater_than(a: Expr, b: Expr) -> Result<Expr, String> {
+    if let (Expr::NumLit(a), Expr::NumLit(b)) = (&a, &b) {
+        return Ok(Expr::BoolLit(a > b).into());
+    }
+    Err(format!(
+        "Invalid comparison, expected numbers, got {:?}",
+        (a, b)
+    ))
+}
+
+fn greater_equal_than(a: Expr, b: Expr) -> Result<Expr, String> {
+    if let (Expr::NumLit(a), Expr::NumLit(b)) = (&a, &b) {
+        return Ok(Expr::BoolLit(a >= b).into());
+    }
+    Err(format!(
+        "Invalid comparison, expected numbers, got {:?}",
+        (a, b)
+    ))
+}
+
+fn less_than(a: Expr, b: Expr) -> Result<Expr, String> {
+    if let (Expr::NumLit(a), Expr::NumLit(b)) = (&a, &b) {
+        return Ok(Expr::BoolLit(a < b).into());
+    }
+    Err(format!(
+        "Invalid comparison, expected numbers, got {:?}",
+        (a, b)
+    ))
+}
+
+fn less_equal_than(a: Expr, b: Expr) -> Result<Expr, String> {
+    if let (Expr::NumLit(a), Expr::NumLit(b)) = (&a, &b) {
+        return Ok(Expr::BoolLit(a <= b).into());
+    }
+    Err(format!(
+        "Invalid comparison, expected numbers, got {:?}",
+        (a, b)
+    ))
+}
+
+fn equal(a: Expr, b: Expr) -> Result<Expr, String> {
+    if let (Expr::NumLit(a), Expr::NumLit(b)) = (&a, &b) {
+        return Ok(Expr::BoolLit(a == b).into());
+    }
+    Err(format!(
+        "Invalid comparison, expected numbers, got {:?}",
         (a, b)
     ))
 }

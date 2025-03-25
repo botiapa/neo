@@ -14,6 +14,11 @@ pub(crate) enum Token {
     Assign,
     Comma,
     SemiColon,
+    GreaterThan,
+    GreaterOrEqualThan,
+    LessThan,
+    LessOrEqualThan,
+    Equal,
     Ident(String),
 }
 
@@ -35,9 +40,9 @@ pub(crate) fn tokenize(inp: &str) -> Result<Vec<Token>, String> {
             '*' => Some(Token::Mult),
             '/' => Some(Token::Div),
             ' ' => None,
-            '=' => Some(Token::Assign),
             ',' => Some(Token::Comma),
             ';' => Some(Token::SemiColon),
+            '=' | '<' | '>' => Some(tokenize_comp(&mut i, &mut stack, &inp)?),
             '\n' => None,
             'a'..='z' | 'A'..='Z' => Some(tokenize_multi_char(&mut i, &mut stack, &inp)),
             c => return Err(format!("Unimplemented char: {}", c)),
@@ -48,7 +53,35 @@ pub(crate) fn tokenize(inp: &str) -> Result<Vec<Token>, String> {
         }
         i += 1;
     }
+    trace!("Tokens: {:?}", tokens);
     Ok(tokens)
+}
+
+fn tokenize_comp(i: &mut usize, _: &mut Vec<char>, inp: &[char]) -> Result<Token, String> {
+    let curr = inp[*i];
+    let next = inp.get(*i + 1);
+    let t = match (curr, next) {
+        ('=', Some('=')) => {
+            *i += 1;
+            Token::Equal
+        }
+        ('>', Some('=')) => {
+            *i += 1;
+            Token::GreaterOrEqualThan
+        }
+        ('<', Some('=')) => {
+            *i += 1;
+            Token::LessOrEqualThan
+        }
+        ('>', _) => Token::GreaterThan,
+        ('<', _) => Token::LessThan,
+        ('=', _) => Token::Assign,
+        _ => Err(format!(
+            "Invalid comparison operator, ({:?},{:?})",
+            curr, next
+        ))?,
+    };
+    Ok(t)
 }
 
 fn tokenize_num(i: &mut usize, stack: &mut Vec<char>, inp: &[char]) -> Result<Token, String> {
@@ -99,6 +132,9 @@ fn built_in(s: &String) -> Option<Token> {
         "ongod" => Some(Token::Assign),
         "glowup" => Some(Token::Plus),
         "glowdown" => Some(Token::Minus),
+        ">=" => Some(Token::GreaterOrEqualThan),
+        "<=" => Some(Token::LessOrEqualThan),
+        "==" => Some(Token::Equal),
         _ => None,
     }
 }
@@ -184,5 +220,39 @@ mod tests {
             ]
         );
         Ok(())
+    }
+
+    #[test]
+    fn tokeniz_gt_lt_eq() {
+        let inp = "a > b; a < b; a >= b; a <= b; a == b; a=b";
+        let tokens = tokenize(inp).unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Ident("a".to_string()),
+                Token::GreaterThan,
+                Token::Ident("b".to_string()),
+                Token::SemiColon,
+                Token::Ident("a".to_string()),
+                Token::LessThan,
+                Token::Ident("b".to_string()),
+                Token::SemiColon,
+                Token::Ident("a".to_string()),
+                Token::GreaterOrEqualThan,
+                Token::Ident("b".to_string()),
+                Token::SemiColon,
+                Token::Ident("a".to_string()),
+                Token::LessOrEqualThan,
+                Token::Ident("b".to_string()),
+                Token::SemiColon,
+                Token::Ident("a".to_string()),
+                Token::Equal,
+                Token::Ident("b".to_string()),
+                Token::SemiColon,
+                Token::Ident("a".to_string()),
+                Token::Assign,
+                Token::Ident("b".to_string()),
+            ]
+        );
     }
 }
