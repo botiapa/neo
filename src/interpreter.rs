@@ -79,17 +79,18 @@ impl Context {
 }
 
 pub(crate) fn interpret(c: &mut Context, expr: Expr) -> Result<Expr, String> {
+    trace!("Interpreting: {:?}, context: {:?}", expr, c);
     match expr {
         Expr::Binary(op, a, b) => match op {
-            BinaryOp::Add => binary_num_op(i32::saturating_add, *a, *b),
-            BinaryOp::Sub => binary_num_op(i32::saturating_sub, *a, *b),
-            BinaryOp::Mult => binary_num_op(i32::saturating_mul, *a, *b),
-            BinaryOp::Div => binary_num_op(i32::saturating_div, *a, *b),
-            BinaryOp::GreaterThan => binary_comp_op(i32::gt, *a, *b),
-            BinaryOp::GreaterOrEqualThan => binary_comp_op(i32::ge, *a, *b),
-            BinaryOp::LessThan => binary_comp_op(i32::lt, *a, *b),
-            BinaryOp::LessOrEqualThan => binary_comp_op(i32::le, *a, *b),
-            BinaryOp::Equal => binary_comp_op(i32::eq, *a, *b),
+            BinaryOp::Add => binary_num_op(c, i32::saturating_add, *a, *b),
+            BinaryOp::Sub => binary_num_op(c, i32::saturating_sub, *a, *b),
+            BinaryOp::Mult => binary_num_op(c, i32::saturating_mul, *a, *b),
+            BinaryOp::Div => binary_num_op(c, i32::saturating_div, *a, *b),
+            BinaryOp::GreaterThan => binary_comp_op(c, i32::gt, *a, *b),
+            BinaryOp::GreaterOrEqualThan => binary_comp_op(c, i32::ge, *a, *b),
+            BinaryOp::LessThan => binary_comp_op(c, i32::lt, *a, *b),
+            BinaryOp::LessOrEqualThan => binary_comp_op(c, i32::le, *a, *b),
+            BinaryOp::Equal => binary_comp_op(c, i32::eq, *a, *b),
         },
         Expr::Function(Token::Ident(fn_name), args) => interpret_base_function(c, &fn_name, args),
         Expr::Block(expressions) => {
@@ -100,16 +101,22 @@ pub(crate) fn interpret(c: &mut Context, expr: Expr) -> Result<Expr, String> {
             Ok(last)
         }
         Expr::NumLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => Ok(expr),
-        Expr::Identifier(var_name) => c
-            .get_var(&var_name)
-            .ok_or(format!("variable({}) not set", var_name)),
+        Expr::Identifier(var_name) => interpret_identifier(c, var_name),
         Expr::Assignment(var_name, value) => interpret_assignment(c, var_name, *value),
         expr => unimplemented!("{:?}", expr),
     }
 }
 
+fn interpret_identifier(c: &mut Context, var_name: String) -> Result<Expr, String> {
+    let v = c
+        .get_var(&var_name)
+        .ok_or(format!("variable({}) not set", var_name))?;
+    expect_literal(c, v)
+}
+
 fn interpret_assignment(c: &mut Context, var_name: String, value: Expr) -> Result<Expr, String> {
-    let res = c.set_var(&var_name, value)?;
+    let lit = expect_literal(c, value)?;
+    let res = c.set_var(&var_name, lit)?;
     trace!("Set variable({}) to {:?}", var_name, res);
     Ok(res)
 }
@@ -151,9 +158,14 @@ fn yap(c: &mut Context, output: &Expr) -> Result<Expr, String> {
     Ok(Expr::NoOp)
 }
 
-fn binary_num_op(op_fn: impl Fn(i32, i32) -> i32, a: Expr, b: Expr) -> Result<Expr, String> {
-    let a = expect_numlit(&mut Context::new(), a)?;
-    let b = expect_numlit(&mut Context::new(), b)?;
+fn binary_num_op(
+    c: &mut Context,
+    op_fn: impl Fn(i32, i32) -> i32,
+    a: Expr,
+    b: Expr,
+) -> Result<Expr, String> {
+    let a = expect_numlit(c, a)?;
+    let b = expect_numlit(c, b)?;
     if let (Expr::NumLit(a), Expr::NumLit(b)) = (&a, &b) {
         return Ok(Expr::NumLit(op_fn(*a, *b)).into());
     }
@@ -163,9 +175,14 @@ fn binary_num_op(op_fn: impl Fn(i32, i32) -> i32, a: Expr, b: Expr) -> Result<Ex
     ))
 }
 
-fn binary_comp_op(op_fn: impl Fn(&i32, &i32) -> bool, a: Expr, b: Expr) -> Result<Expr, String> {
-    let a = expect_numlit(&mut Context::new(), a)?;
-    let b = expect_numlit(&mut Context::new(), b)?;
+fn binary_comp_op(
+    c: &mut Context,
+    op_fn: impl Fn(&i32, &i32) -> bool,
+    a: Expr,
+    b: Expr,
+) -> Result<Expr, String> {
+    let a = expect_numlit(c, a)?;
+    let b = expect_numlit(c, b)?;
     if let (Expr::NumLit(a), Expr::NumLit(b)) = (&a, &b) {
         return Ok(Expr::BoolLit(op_fn(a, b)).into());
     }
@@ -173,4 +190,86 @@ fn binary_comp_op(op_fn: impl Fn(&i32, &i32) -> bool, a: Expr, b: Expr) -> Resul
         "Invalid comparison, expected numbers, got {:?}",
         (a, b)
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn add() -> Result<(), String> {
+        let mut c = Context::new();
+        let res = interpret(
+            &mut c,
+            Expr::Binary(
+                BinaryOp::Add,
+                Box::new(Expr::NumLit(1)),
+                Box::new(Expr::NumLit(2)),
+            ),
+        )?;
+        assert_eq!(res, Expr::NumLit(3));
+        Ok(())
+    }
+
+    #[test]
+    fn assignment() -> Result<(), String> {
+        let mut c = Context::new();
+        let res = interpret(
+            &mut c,
+            Expr::Assignment("a".to_string(), Box::new(Expr::NumLit(1))),
+        )?;
+        assert_eq!(res, Expr::NumLit(1));
+        Ok(())
+    }
+
+    #[test]
+    fn test_interpret_block() -> Result<(), String> {
+        let mut c = Context::new();
+        let res = interpret(
+            &mut c,
+            Expr::Block(vec![
+                Expr::Assignment("a".to_string(), Box::new(Expr::NumLit(1))),
+                Expr::Assignment("b".to_string(), Box::new(Expr::NumLit(2))),
+                Expr::Binary(
+                    BinaryOp::Add,
+                    Box::new(Expr::Identifier("a".to_string())),
+                    Box::new(Expr::Identifier("b".to_string())),
+                ),
+            ]),
+        )?;
+        assert_eq!(res, Expr::NumLit(3));
+        Ok(())
+    }
+
+    #[test]
+    fn yap() -> Result<(), String> {
+        let mut c = Context::new();
+        let res = interpret(
+            &mut c,
+            Expr::Function(
+                Token::Ident("yap".to_string()),
+                vec![Expr::StringLit("hello".to_string())],
+            ),
+        )?;
+        assert_eq!(res, Expr::NoOp);
+        assert_eq!(c.stdout, vec!["hello".to_string()]);
+        Ok(())
+    }
+
+    #[test]
+    fn test_chained_assignment() -> Result<(), String> {
+        let mut c = Context::new();
+        // a=b=1
+        let res = interpret(
+            &mut c,
+            Expr::Assignment(
+                "a".to_string(),
+                Box::new(Expr::Assignment("b".to_string(), Box::new(Expr::NumLit(1)))),
+            ),
+        )?;
+        assert_eq!(res, Expr::NumLit(1));
+        assert_eq!(c.get_var("a"), Some(Expr::NumLit(1)));
+        assert_eq!(c.get_var("b"), Some(Expr::NumLit(1)));
+        Ok(())
+    }
 }

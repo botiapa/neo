@@ -106,7 +106,18 @@ impl Parser {
             }
         }
         self.pos = start;
+        self.assert_assignment()?;
         self.parse_comp()
+    }
+
+    fn assert_assignment(&mut self) -> Result<(), String> {
+        let start = self.pos;
+        let l = self.consume();
+        if let Some(Token::Assign) = self.consume() {
+            return Err(format!("Invalid assignment {:?} = ?", l));
+        }
+        self.pos = start;
+        Ok(())
     }
 
     #[inline]
@@ -264,7 +275,6 @@ impl Parser {
 
     fn parse_function(&mut self) -> Result<Option<Expr>, String> {
         let start = self.pos;
-
         if let Some(Token::Ident(fn_name)) = self.consume() {
             if let Some(Token::LeftPar) = self.consume() {
                 let mut args = Vec::new();
@@ -451,5 +461,32 @@ mod tests {
                 )),
             )
         );
+    }
+
+    #[test]
+    fn fail_const_assignment() {
+        let mut parser = Parser::new(vec![
+            Token::NumLiteral(42),
+            Token::Assign,
+            Token::NumLiteral(42),
+        ]);
+        let expr = parser.parse();
+        assert!(expr.is_err());
+    }
+
+    #[test]
+    fn fail_compl_assignment() {
+        //a=1==1=b
+        let mut parser = Parser::new(vec![
+            Token::Ident("a".to_string()),
+            Token::Assign,
+            Token::NumLiteral(1),
+            Token::Equal,
+            Token::NumLiteral(1),
+            Token::Assign,
+            Token::Ident("b".to_string()),
+        ]);
+        let expr = parser.parse();
+        assert!(expr.is_err());
     }
 }
