@@ -59,7 +59,7 @@ pub(crate) fn tokenize(inp: &str) -> Result<Vec<Token>, String> {
             '!' => Some(Token::Negate),
             '=' | '<' | '>' => Some(tokenize_comp(&mut i, &mut stack, &inp)?),
             '\n' | '\r' => None,
-            'a'..='z' | 'A'..='Z' => Some(tokenize_multi_char(&mut i, &mut stack, &inp)),
+            'a'..='z' | 'A'..='Z' | '?' => Some(tokenize_multi_char(&mut i, &mut stack, &inp)),
             c => return Err(format!("Unimplemented char: {}", c)),
         };
         if let Some(token) = token {
@@ -137,30 +137,37 @@ fn tokenize_string(i: &mut usize, stack: &mut Vec<char>, inp: &[char]) -> Result
 }
 
 fn tokenize_multi_char(i: &mut usize, stack: &mut Vec<char>, inp: &[char]) -> Token {
-    while *i < inp.len() && matches!(inp[*i], 'a'..='z' | 'A'..='Z') {
+    while *i < inp.len() && matches!(inp[*i], 'a'..='z' | 'A'..='Z' | '?') {
         stack.push(inp[*i]);
         *i += 1;
     }
     let ident = stack.iter().collect::<String>();
     stack.clear();
     *i -= 1;
-    built_in(&ident).unwrap_or(Token::Ident(ident))
+    built_in(&ident).unwrap_or_else(|| built_in_cursed(&ident).unwrap_or(Token::Ident(ident)))
 }
 
 fn built_in(s: &String) -> Option<Token> {
     match s.to_lowercase().as_str() {
         "true" => Some(Token::BoolLiteral(true)),
         "false" => Some(Token::BoolLiteral(false)),
-        "ongod" => Some(Token::Assign),
-        "glowup" => Some(Token::Plus),
-        "glowdown" => Some(Token::Minus),
-        "nah" => Some(Token::Negate),
         ">=" => Some(Token::GreaterOrEqualThan),
         "<=" => Some(Token::LessOrEqualThan),
         "==" => Some(Token::Equal),
         "if" => Some(Token::If),
         "else" => Some(Token::Else),
         "while" => Some(Token::While),
+        _ => None,
+    }
+}
+
+fn built_in_cursed(s: &String) -> Option<Token> {
+    match s.to_lowercase().as_str() {
+        "ongod" => Some(Token::Assign),
+        "glowup" => Some(Token::Plus),
+        "glowdown" => Some(Token::Minus),
+        "nah" => Some(Token::Negate),
+        "fr?" => Some(Token::If),
         _ => None,
     }
 }
@@ -408,6 +415,31 @@ mod tests {
         let inp = "nah true";
         let tokens = tokenize(inp)?;
         assert_eq!(tokens, vec![Token::Negate, Token::BoolLiteral(true)]);
+        Ok(())
+    }
+
+    #[test]
+    fn tokenize_cursed_if() -> Result<(), String> {
+        let inp = "fr? a > b { 42; } else { 69; }";
+        let tokens = tokenize(inp)?;
+        assert_eq!(
+            tokens,
+            vec![
+                Token::If,
+                Token::Ident("a".to_string()),
+                Token::GreaterThan,
+                Token::Ident("b".to_string()),
+                Token::OpenCurly,
+                Token::NumLiteral(42),
+                Token::SemiColon,
+                Token::CloseCurly,
+                Token::Else,
+                Token::OpenCurly,
+                Token::NumLiteral(69),
+                Token::SemiColon,
+                Token::CloseCurly,
+            ]
+        );
         Ok(())
     }
 }
