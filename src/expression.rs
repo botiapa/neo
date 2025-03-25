@@ -95,29 +95,24 @@ impl Parser {
     #[instrument(level = "trace", skip_all)]
     fn parse_assignment(&mut self) -> Result<Option<Expr>, String> {
         let start = self.pos;
-        if let Some(Token::Ident(var_name)) = self.consume() {
-            if let Some(Token::Assign) = self.consume() {
-                let expr = match self.parse_assignment() {
+        let left = match self.parse_comp() {
+            Ok(Some(expr)) => expr,
+            left @ _ => return left,
+        };
+        trace!("Parsed: {:?}", left);
+        if let Some(Token::Assign) = self.consume() {
+            if let Expr::Identifier(id) = left {
+                let right = match self.parse_comp() {
                     Ok(Some(expr)) => expr,
                     expr @ _ => return expr,
                 };
-                trace!("Parsed assignment: {} = {:?}", var_name, expr);
-                return Ok(Some(Expr::Assignment(var_name, Box::new(expr))));
+                return Ok(Some(Expr::Assignment(id, Box::new(right))));
+            } else {
+                return Err(format!("Invalid left-hand side of assignment: {:?}", left));
             }
         }
         self.pos = start;
-        self.assert_assignment()?;
         self.parse_comp()
-    }
-
-    fn assert_assignment(&mut self) -> Result<(), String> {
-        let start = self.pos;
-        let l = self.consume();
-        if let Some(Token::Assign) = self.consume() {
-            return Err(format!("Invalid assignment {:?} = ?", l));
-        }
-        self.pos = start;
-        Ok(())
     }
 
     #[inline]
@@ -478,8 +473,6 @@ mod tests {
     fn fail_compl_assignment() {
         //a=1==1=b
         let mut parser = Parser::new(vec![
-            Token::Ident("a".to_string()),
-            Token::Assign,
             Token::NumLiteral(1),
             Token::Equal,
             Token::NumLiteral(1),
