@@ -5,14 +5,14 @@ use std::{
     path::Path,
 };
 
-use executer::{Context, interpret};
 use expression::Parser;
+use interpreter::{Context, interpret};
 use tokenizer::tokenize;
 use tracing::{error, warn};
 use tracing_subscriber::EnvFilter;
 
-mod executer;
 mod expression;
+mod interpreter;
 mod tokenizer;
 
 fn main() {

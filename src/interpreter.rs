@@ -81,17 +81,17 @@ impl Context {
 pub(crate) fn interpret(c: &mut Context, expr: Expr) -> Result<Expr, String> {
     match expr {
         Expr::Binary(op, a, b) => match op {
-            BinaryOp::Add => binary_op(c, add, *a, *b),
-            BinaryOp::Sub => binary_op(c, sub, *a, *b),
-            BinaryOp::Mult => binary_op(c, mult, *a, *b),
-            BinaryOp::Div => binary_op(c, div, *a, *b),
-            BinaryOp::GreaterThan => binary_op(c, greater_than, *a, *b),
-            BinaryOp::GreaterOrEqualThan => binary_op(c, greater_equal_than, *a, *b),
-            BinaryOp::LessThan => binary_op(c, less_than, *a, *b),
-            BinaryOp::LessOrEqualThan => binary_op(c, less_equal_than, *a, *b),
-            BinaryOp::Equal => binary_op(c, equal, *a, *b),
+            BinaryOp::Add => binary_num_op(i32::saturating_add, *a, *b),
+            BinaryOp::Sub => binary_num_op(i32::saturating_sub, *a, *b),
+            BinaryOp::Mult => binary_num_op(i32::saturating_mul, *a, *b),
+            BinaryOp::Div => binary_num_op(i32::saturating_div, *a, *b),
+            BinaryOp::GreaterThan => binary_comp_op(i32::gt, *a, *b),
+            BinaryOp::GreaterOrEqualThan => binary_comp_op(i32::ge, *a, *b),
+            BinaryOp::LessThan => binary_comp_op(i32::lt, *a, *b),
+            BinaryOp::LessOrEqualThan => binary_comp_op(i32::le, *a, *b),
+            BinaryOp::Equal => binary_comp_op(i32::eq, *a, *b),
         },
-        Expr::Function(Token::Ident(fn_name), args) => execute_base_function(c, &fn_name, args),
+        Expr::Function(Token::Ident(fn_name), args) => interpret_base_function(c, &fn_name, args),
         Expr::Block(expressions) => {
             let mut last = Expr::NoOp;
             for expr in expressions {
@@ -103,18 +103,18 @@ pub(crate) fn interpret(c: &mut Context, expr: Expr) -> Result<Expr, String> {
         Expr::Identifier(var_name) => c
             .get_var(&var_name)
             .ok_or(format!("variable({}) not set", var_name)),
-        Expr::Assignment(var_name, value) => execute_assignment(c, var_name, *value),
+        Expr::Assignment(var_name, value) => interpret_assignment(c, var_name, *value),
         expr => unimplemented!("{:?}", expr),
     }
 }
 
-fn execute_assignment(c: &mut Context, var_name: String, value: Expr) -> Result<Expr, String> {
+fn interpret_assignment(c: &mut Context, var_name: String, value: Expr) -> Result<Expr, String> {
     let res = c.set_var(&var_name, value)?;
     trace!("Set variable({}) to {:?}", var_name, res);
     Ok(res)
 }
 
-fn execute_base_function(c: &mut Context, name: &str, args: Vec<Expr>) -> Result<Expr, String> {
+fn interpret_base_function(c: &mut Context, name: &str, args: Vec<Expr>) -> Result<Expr, String> {
     match name {
         "yap" => yap(c, args.get(0).ok_or("Expected an argument")?),
         _ => unimplemented!(),
@@ -151,100 +151,23 @@ fn yap(c: &mut Context, output: &Expr) -> Result<Expr, String> {
     Ok(Expr::NoOp)
 }
 
-fn binary_op(
-    c: &mut Context,
-    op: fn(Expr, Expr) -> Result<Expr, String>,
-    a: Expr,
-    b: Expr,
-) -> Result<Expr, String> {
-    let a = expect_numlit(c, a)?;
-    let b = expect_numlit(c, b)?;
-    op(a, b)
-}
-
-fn add(a: Expr, b: Expr) -> Result<Expr, String> {
+fn binary_num_op(op_fn: impl Fn(i32, i32) -> i32, a: Expr, b: Expr) -> Result<Expr, String> {
+    let a = expect_numlit(&mut Context::new(), a)?;
+    let b = expect_numlit(&mut Context::new(), b)?;
     if let (Expr::NumLit(a), Expr::NumLit(b)) = (&a, &b) {
-        return Ok(Expr::NumLit(a + b).into());
+        return Ok(Expr::NumLit(op_fn(*a, *b)).into());
     }
     Err(format!(
-        "Invalid addition, expected numbers, got {:?}",
+        "Invalid operation, expected numbers, got {:?}",
         (a, b)
     ))
 }
 
-fn sub(a: Expr, b: Expr) -> Result<Expr, String> {
+fn binary_comp_op(op_fn: impl Fn(&i32, &i32) -> bool, a: Expr, b: Expr) -> Result<Expr, String> {
+    let a = expect_numlit(&mut Context::new(), a)?;
+    let b = expect_numlit(&mut Context::new(), b)?;
     if let (Expr::NumLit(a), Expr::NumLit(b)) = (&a, &b) {
-        return Ok(Expr::NumLit(a - b).into());
-    }
-    Err(format!(
-        "Invalid subtraction, expected numbers, got {:?}",
-        (a, b)
-    ))
-}
-
-fn mult(a: Expr, b: Expr) -> Result<Expr, String> {
-    if let (Expr::NumLit(a), Expr::NumLit(b)) = (&a, &b) {
-        return Ok(Expr::NumLit(a * b).into());
-    }
-    Err(format!(
-        "Invalid multiplication, expected numbers, got {:?}",
-        (a, b)
-    ))
-}
-
-fn div(a: Expr, b: Expr) -> Result<Expr, String> {
-    if let (Expr::NumLit(a), Expr::NumLit(b)) = (&a, &b) {
-        return Ok(Expr::NumLit(a / b).into());
-    }
-    Err(format!(
-        "Invalid division, expected numbers, got {:?}",
-        (a, b)
-    ))
-}
-
-fn greater_than(a: Expr, b: Expr) -> Result<Expr, String> {
-    if let (Expr::NumLit(a), Expr::NumLit(b)) = (&a, &b) {
-        return Ok(Expr::BoolLit(a > b).into());
-    }
-    Err(format!(
-        "Invalid comparison, expected numbers, got {:?}",
-        (a, b)
-    ))
-}
-
-fn greater_equal_than(a: Expr, b: Expr) -> Result<Expr, String> {
-    if let (Expr::NumLit(a), Expr::NumLit(b)) = (&a, &b) {
-        return Ok(Expr::BoolLit(a >= b).into());
-    }
-    Err(format!(
-        "Invalid comparison, expected numbers, got {:?}",
-        (a, b)
-    ))
-}
-
-fn less_than(a: Expr, b: Expr) -> Result<Expr, String> {
-    if let (Expr::NumLit(a), Expr::NumLit(b)) = (&a, &b) {
-        return Ok(Expr::BoolLit(a < b).into());
-    }
-    Err(format!(
-        "Invalid comparison, expected numbers, got {:?}",
-        (a, b)
-    ))
-}
-
-fn less_equal_than(a: Expr, b: Expr) -> Result<Expr, String> {
-    if let (Expr::NumLit(a), Expr::NumLit(b)) = (&a, &b) {
-        return Ok(Expr::BoolLit(a <= b).into());
-    }
-    Err(format!(
-        "Invalid comparison, expected numbers, got {:?}",
-        (a, b)
-    ))
-}
-
-fn equal(a: Expr, b: Expr) -> Result<Expr, String> {
-    if let (Expr::NumLit(a), Expr::NumLit(b)) = (&a, &b) {
-        return Ok(Expr::BoolLit(a == b).into());
+        return Ok(Expr::BoolLit(op_fn(a, b)).into());
     }
     Err(format!(
         "Invalid comparison, expected numbers, got {:?}",
