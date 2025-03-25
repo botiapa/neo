@@ -86,5 +86,8 @@ fn interpret_string(inp: &str) {
     let expr = parser.parse().unwrap().unwrap();
     let res = interpret(&mut context, expr);
     context.flush_stdout().expect("Failed writing to stdout");
-    println!("Result: {:?}", res);
+    match res {
+        Ok(res) => println!("Result: {:?}", res),
+        Err(err) => println!("Failed interpreting: {}", err),
+    }
 }
