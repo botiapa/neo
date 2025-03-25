@@ -37,6 +37,7 @@ pub(crate) enum Expr {
     NoOp,
 }
 
+#[allow(unused)]
 mod helpers {
     use crate::tokenizer::Token;
 
@@ -122,10 +123,6 @@ impl Parser {
 
     fn peek(&self) -> Option<Token> {
         self.tokens.get(self.pos).cloned()
-    }
-
-    fn prev(&self) -> Option<Token> {
-        self.tokens.get(self.pos - 1).cloned()
     }
 
     fn consume(&mut self) -> Option<Token> {
@@ -468,12 +465,10 @@ impl Parser {
 #[cfg(test)]
 mod tests {
 
-    use std::process::id;
-
     use super::helpers::*;
-    use crate::expression::{BinaryOp, helpers};
+    use crate::expression::BinaryOp;
 
-    use super::{Expr, Parser, Token};
+    use super::{Parser, Token};
 
     #[test]
     fn parse_single_expr() {
