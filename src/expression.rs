@@ -6,6 +6,7 @@ use crate::tokenizer::Token;
 pub(crate) enum UnaryOp {
     Plus,
     Minus,
+    Negate,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -432,6 +433,14 @@ impl Parser {
                 };
                 Ok(Some(Expr::Unary(UnaryOp::Minus, Box::new(expr))))
             }
+            Token::Negate => {
+                self.consume();
+                let expr = match self.parse_primary() {
+                    Ok(Some(expr)) => expr,
+                    expr @ _ => return expr,
+                };
+                Ok(Some(Expr::Unary(UnaryOp::Negate, Box::new(expr))))
+            }
             _ => Ok(None),
         }
     }
@@ -466,7 +475,7 @@ impl Parser {
 mod tests {
 
     use super::helpers::*;
-    use crate::expression::BinaryOp;
+    use crate::expression::{BinaryOp, UnaryOp};
 
     use super::{Parser, Token};
 
@@ -773,5 +782,12 @@ mod tests {
                 block(&[iden("a"), iden("b")])
             )
         )
+    }
+
+    #[test]
+    fn negate() {
+        let mut parser = Parser::new(vec![Token::Negate, Token::BoolLiteral(true)]);
+        let expr = parser.parse().unwrap().unwrap();
+        assert_eq!(expr, unary(UnaryOp::Negate, bool_lit(true)));
     }
 }

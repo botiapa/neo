@@ -84,6 +84,7 @@ pub(crate) fn interpret(c: &mut Context, expr: Expr) -> Result<Expr, String> {
         Expr::Unary(op, a) => match op {
             UnaryOp::Plus => interpret(c, *a),
             UnaryOp::Minus => binary_num_op(c, i32::saturating_sub, Expr::NumLit(0), *a),
+            UnaryOp::Negate => negate(c, *a),
         },
         Expr::Binary(op, a, b) => match op {
             BinaryOp::Add => binary_num_op(c, i32::saturating_add, *a, *b),
@@ -111,6 +112,11 @@ pub(crate) fn interpret(c: &mut Context, expr: Expr) -> Result<Expr, String> {
         Expr::While(cond, body) => interpet_while(c, *cond, *body),
         expr => unimplemented!("{:?}", expr),
     }
+}
+
+fn negate(c: &mut Context, expr: Expr) -> Result<Expr, String> {
+    let lit = expect_boollit(c, expr)?;
+    Ok(Expr::BoolLit(!lit))
 }
 
 fn interpet_while(c: &mut Context, cond: Expr, body: Expr) -> Result<Expr, String> {
@@ -382,6 +388,17 @@ mod tests {
         )?;
         assert_eq!(res, Expr::NumLit(5));
         assert_eq!(c.get_var("a"), Some(Expr::NumLit(5)));
+        Ok(())
+    }
+
+    #[test]
+    fn negate() -> Result<(), String> {
+        let mut c = Context::new();
+        let res = interpret(
+            &mut c,
+            Expr::Unary(UnaryOp::Negate, Box::new(Expr::BoolLit(true))),
+        )?;
+        assert_eq!(res, Expr::BoolLit(false));
         Ok(())
     }
 }

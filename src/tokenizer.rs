@@ -24,6 +24,7 @@ pub(crate) enum Token {
     If,
     Else,
     While,
+    Negate,
     Ident(String),
 }
 
@@ -55,6 +56,7 @@ pub(crate) fn tokenize(inp: &str) -> Result<Vec<Token>, String> {
             ';' => Some(Token::SemiColon),
             '{' => Some(Token::OpenCurly),
             '}' => Some(Token::CloseCurly),
+            '!' => Some(Token::Negate),
             '=' | '<' | '>' => Some(tokenize_comp(&mut i, &mut stack, &inp)?),
             '\n' | '\r' => None,
             'a'..='z' | 'A'..='Z' => Some(tokenize_multi_char(&mut i, &mut stack, &inp)),
@@ -152,6 +154,7 @@ fn built_in(s: &String) -> Option<Token> {
         "ongod" => Some(Token::Assign),
         "glowup" => Some(Token::Plus),
         "glowdown" => Some(Token::Minus),
+        "nah" => Some(Token::Negate),
         ">=" => Some(Token::GreaterOrEqualThan),
         "<=" => Some(Token::LessOrEqualThan),
         "==" => Some(Token::Equal),
@@ -389,6 +392,22 @@ mod tests {
         let inp = "//This is a comment \n 42";
         let tokens = tokenize(inp)?;
         assert_eq!(tokens, vec![Token::NumLiteral(42)]);
+        Ok(())
+    }
+
+    #[test]
+    fn tokenize_negate() -> Result<(), String> {
+        let inp = "!true";
+        let tokens = tokenize(inp)?;
+        assert_eq!(tokens, vec![Token::Negate, Token::BoolLiteral(true)]);
+        Ok(())
+    }
+
+    #[test]
+    fn tokenize_negate_cursed() -> Result<(), String> {
+        let inp = "nah true";
+        let tokens = tokenize(inp)?;
+        assert_eq!(tokens, vec![Token::Negate, Token::BoolLiteral(true)]);
         Ok(())
     }
 }
