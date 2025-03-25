@@ -108,8 +108,23 @@ pub(crate) fn interpret(c: &mut Context, expr: Expr) -> Result<Expr, String> {
         Expr::Identifier(var_name) => interpret_identifier(c, var_name),
         Expr::Assignment(var_name, value) => interpret_assignment(c, var_name, *value),
         Expr::If(cond, then, else_) => interpret_if(c, *cond, *then, else_.map(|e| *e)),
+        Expr::While(cond, body) => interpet_while(c, *cond, *body),
         expr => unimplemented!("{:?}", expr),
     }
+}
+
+fn interpet_while(c: &mut Context, cond: Expr, body: Expr) -> Result<Expr, String> {
+    let mut res = Expr::NoOp;
+    trace!("Interpreting while: {:?}, body: {:?}", cond, body);
+    loop {
+        let cond = expect_boollit(c, cond.clone())?;
+        if !cond {
+            break;
+        }
+        res = interpret(c, body.clone())?;
+    }
+    trace!("Exiting while loop, result: {:?}", res);
+    Ok(res)
 }
 
 fn interpret_if(
@@ -118,11 +133,7 @@ fn interpret_if(
     then: Expr,
     else_: Option<Expr>,
 ) -> Result<Expr, String> {
-    let cond = match expect_boollit(c, cond)? {
-        Expr::BoolLit(b) => b,
-        cond => return Err(format!("Expected a boolean, got {:?}", cond)),
-    };
-
+    let cond = expect_boollit(c, cond)?;
     trace!(
         "Interpreting if: {:?}, then: {:?}, else: {:?}",
         cond, then, else_
@@ -166,10 +177,14 @@ fn expect_numlit(c: &mut Context, expr: Expr) -> Result<Expr, String> {
     }
 }
 
-fn expect_boollit(c: &mut Context, expr: Expr) -> Result<Expr, String> {
+fn expect_boollit(c: &mut Context, expr: Expr) -> Result<bool, String> {
     match expr {
-        Expr::BoolLit(_) => Ok(expr),
-        _ => interpret(c, expr),
+        Expr::BoolLit(b) => Ok(b),
+        _ => match interpret(c, expr) {
+            Ok(Expr::BoolLit(b)) => Ok(b),
+            Ok(expr) => Err(format!("Expected a boolean, got {:?}", expr)),
+            Err(err) => Err(err),
+        },
     }
 }
 
@@ -338,6 +353,35 @@ mod tests {
             ),
         )?;
         assert_eq!(res, Expr::NumLit(2));
+        Ok(())
+    }
+
+    #[test]
+    fn while_loop() -> Result<(), String> {
+        let mut c = Context::new();
+        let res = interpret(
+            &mut c,
+            Expr::Block(vec![
+                Expr::Assignment("a".to_string(), Box::new(Expr::NumLit(0))),
+                Expr::While(
+                    Box::new(Expr::Binary(
+                        BinaryOp::LessThan,
+                        Box::new(Expr::Identifier("a".to_string())),
+                        Box::new(Expr::NumLit(5)),
+                    )),
+                    Box::new(Expr::Assignment(
+                        "a".to_string(),
+                        Box::new(Expr::Binary(
+                            BinaryOp::Add,
+                            Box::new(Expr::Identifier("a".to_string())),
+                            Box::new(Expr::NumLit(1)),
+                        )),
+                    )),
+                ),
+            ]),
+        )?;
+        assert_eq!(res, Expr::NumLit(5));
+        assert_eq!(c.get_var("a"), Some(Expr::NumLit(5)));
         Ok(())
     }
 }

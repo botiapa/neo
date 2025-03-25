@@ -23,6 +23,7 @@ pub(crate) enum Token {
     CloseCurly,
     If,
     Else,
+    While,
     Ident(String),
 }
 
@@ -143,6 +144,7 @@ fn built_in(s: &String) -> Option<Token> {
         "==" => Some(Token::Equal),
         "if" => Some(Token::If),
         "else" => Some(Token::Else),
+        "while" => Some(Token::While),
         _ => None,
     }
 }
@@ -340,6 +342,30 @@ mod tests {
                 Token::Plus,
                 Token::NumLiteral(4),
                 Token::NumLiteral(4)
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn tokenize_while() -> Result<(), String> {
+        let inp = "while a > b { a = a - 1; }";
+        let tokens = tokenize(inp)?;
+        assert_eq!(
+            tokens,
+            vec![
+                Token::While,
+                Token::Ident("a".to_string()),
+                Token::GreaterThan,
+                Token::Ident("b".to_string()),
+                Token::OpenCurly,
+                Token::Ident("a".to_string()),
+                Token::Assign,
+                Token::Ident("a".to_string()),
+                Token::Minus,
+                Token::NumLiteral(1),
+                Token::SemiColon,
+                Token::CloseCurly,
             ]
         );
         Ok(())

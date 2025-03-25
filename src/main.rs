@@ -8,7 +8,6 @@ use std::{
 use expression::Parser;
 use interpreter::{Context, interpret};
 use tokenizer::tokenize;
-use tracing::{error, warn};
 use tracing_subscriber::EnvFilter;
 
 mod expression;

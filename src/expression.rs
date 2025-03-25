@@ -1,5 +1,4 @@
 use tracing::{instrument, trace};
-use tracing_subscriber::fmt::format;
 
 use crate::tokenizer::Token;
 
@@ -34,7 +33,62 @@ pub(crate) enum Expr {
     Block(Vec<Expr>),
     Assignment(String, Box<Expr>),
     If(Box<Expr>, Box<Expr>, Option<Box<Expr>>),
+    While(Box<Expr>, Box<Expr>),
     NoOp,
+}
+
+mod helpers {
+    use crate::tokenizer::Token;
+
+    use super::{BinaryOp, Expr, UnaryOp};
+
+    pub(crate) fn num_lit(n: i32) -> Expr {
+        Expr::NumLit(n)
+    }
+
+    pub(crate) fn string_lit(s: String) -> Expr {
+        Expr::StringLit(s)
+    }
+
+    pub(crate) fn bool_lit(b: bool) -> Expr {
+        Expr::BoolLit(b)
+    }
+
+    pub(crate) fn iden(id: &str) -> Expr {
+        Expr::Identifier(id.to_string())
+    }
+
+    pub(crate) fn unary(op: UnaryOp, expr: Expr) -> Expr {
+        Expr::Unary(op, Box::new(expr))
+    }
+
+    pub(crate) fn binary(op: BinaryOp, left: Expr, right: Expr) -> Expr {
+        Expr::Binary(op, Box::new(left), Box::new(right))
+    }
+
+    pub(crate) fn function(name: Token, args: Vec<Expr>) -> Expr {
+        Expr::Function(name, args)
+    }
+
+    pub(crate) fn block(exprs: &[Expr]) -> Expr {
+        Expr::Block(exprs.to_vec())
+    }
+
+    pub(crate) fn assignment(id: String, expr: Expr) -> Expr {
+        Expr::Assignment(id, Box::new(expr))
+    }
+
+    pub(crate) fn if_expr(cond: Expr, then: Expr, else_block: Option<Expr>) -> Expr {
+        Expr::If(Box::new(cond), Box::new(then), else_block.map(Box::new))
+    }
+
+    pub(crate) fn while_expr(cond: Expr, block: Expr) -> Expr {
+        Expr::While(Box::new(cond), Box::new(block))
+    }
+
+    pub(crate) fn no_op() -> Expr {
+        Expr::NoOp
+    }
 }
 
 #[derive(Debug)]
@@ -68,6 +122,10 @@ impl Parser {
 
     fn peek(&self) -> Option<Token> {
         self.tokens.get(self.pos).cloned()
+    }
+
+    fn prev(&self) -> Option<Token> {
+        self.tokens.get(self.pos - 1).cloned()
     }
 
     fn consume(&mut self) -> Option<Token> {
@@ -111,6 +169,7 @@ impl Parser {
             trace!("Parsed block: {:?}", block);
             return Ok(Some(Expr::Block(block)));
         }
+        trace!("Failed to parse block, parsing expr");
         self.pos = start;
         let expr = self.parse_expr()?;
         if let Some(Token::SemiColon) = self.peek() {
@@ -121,13 +180,31 @@ impl Parser {
 
     #[instrument(level = "trace", skip_all)]
     fn parse_expr(&mut self) -> Result<Option<Expr>, String> {
-        let expr = match self.parse_if() {
+        let expr = match self.parse_while() {
             Ok(Some(expr)) => expr,
             expr @ _ => return expr,
         };
 
         trace!("Parsed expr: {:?}", expr);
         Ok(Some(expr))
+    }
+
+    #[instrument(level = "trace", skip_all)]
+    fn parse_while(&mut self) -> Result<Option<Expr>, String> {
+        let start = self.pos;
+        if let Some(Token::While) = self.consume() {
+            let cond = self
+                .parse_block()?
+                .ok_or(format!("Expected expression after 'while'"))?;
+            trace!("Parsed cond: {:?}", cond);
+            let block = self
+                .parse_block()?
+                .ok_or(format!("Expected expression after 'condition'"))?;
+            trace!("Parsed block: {:?}", block);
+            return Ok(Some(Expr::While(Box::new(cond), Box::new(block))));
+        }
+        self.pos = start;
+        self.parse_if()
     }
 
     #[instrument(level = "trace", skip_all)]
@@ -138,35 +215,19 @@ impl Parser {
                 .parse_block()?
                 .ok_or(format!("Expected expression after 'if'"))?;
             trace!("Parsed cond: {:?}", cond);
-            if !matches!(self.consume(), Some(Token::OpenCurly)) {
-                return Err(format!("Expected '{{' after 'if'"));
-            }
             let then = self
                 .parse_block()?
                 .ok_or(format!("Expected expression after 'condition'"))?;
             trace!("Parsed then: {:?}", then);
-            if !matches!(self.consume(), Some(Token::CloseCurly)) {
-                return Err(format!("Expected '}}' after 'then'"));
-            }
             if let Some(Token::Else) = self.consume() {
-                let else_expr = match self.peek() {
-                    Some(Token::If) => self.parse_if()?,
-                    Some(Token::OpenCurly) => {
-                        self.consume();
-                        let expr = self.parse_block()?;
-                        if !matches!(self.consume(), Some(Token::CloseCurly)) {
-                            return Err(format!("Expected '}}' after 'else'"));
-                        }
-                        expr
-                    }
-                    _ => return Err(format!("Expected '{{' or 'if' after 'else'")),
-                }
-                .ok_or(format!("Expected '{{' or 'if' after 'else'"))?;
+                let else_block = self
+                    .parse_block()?
+                    .ok_or(format!("Expected expression after 'else'"))?;
 
                 return Ok(Some(Expr::If(
                     Box::new(cond),
                     Box::new(then),
-                    Some(Box::new(else_expr)),
+                    Some(Box::new(else_block)),
                 )));
             } else {
                 return Ok(Some(Expr::If(Box::new(cond), Box::new(then), None)));
@@ -407,7 +468,10 @@ impl Parser {
 #[cfg(test)]
 mod tests {
 
-    use crate::expression::BinaryOp;
+    use std::process::id;
+
+    use super::helpers::*;
+    use crate::expression::{BinaryOp, helpers};
 
     use super::{Expr, Parser, Token};
 
@@ -561,7 +625,7 @@ mod tests {
     }
 
     #[test]
-    fn if_expr() {
+    fn simple_if_expr() {
         // if a > b {a}
         let mut parser = Parser::new(vec![
             Token::If,
@@ -581,7 +645,7 @@ mod tests {
                     Box::new(Expr::Identifier("a".to_string())),
                     Box::new(Expr::Identifier("b".to_string())),
                 )),
-                Box::new(Expr::Identifier("a".to_string())),
+                Box::new(Expr::Block(vec![Expr::Identifier("a".to_string())])),
                 None
             )
         );
@@ -589,6 +653,7 @@ mod tests {
 
     #[test]
     fn if_else_expr() {
+        // if a > b {a} else {b}
         let mut parser = Parser::new(vec![
             Token::If,
             Token::Ident("a".to_string()),
@@ -605,14 +670,10 @@ mod tests {
         let expr = parser.parse().unwrap().unwrap();
         assert_eq!(
             expr,
-            Expr::If(
-                Box::new(Expr::Binary(
-                    super::BinaryOp::GreaterThan,
-                    Box::new(Expr::Identifier("a".to_string())),
-                    Box::new(Expr::Identifier("b".to_string()))
-                )),
-                Box::new(Expr::Identifier("a".to_string())),
-                Some(Box::new(Expr::Identifier("b".to_string())))
+            if_expr(
+                binary(BinaryOp::GreaterThan, iden("a"), iden("b")),
+                block(&[iden("a")]),
+                Some(block(&[iden("b")]))
             )
         );
     }
@@ -647,22 +708,47 @@ mod tests {
         let expr = parser.parse().unwrap().unwrap();
         assert_eq!(
             expr,
+            if_expr(
+                binary(BinaryOp::GreaterThan, iden("a"), iden("b")),
+                block(&[num_lit(42)]),
+                Some(if_expr(
+                    binary(BinaryOp::LessThan, iden("a"), iden("b")),
+                    block(&[num_lit(69)]),
+                    Some(block(&[num_lit(420)]))
+                ))
+            )
+        )
+    }
+
+    #[test]
+    fn complex_if() {
+        // if a > b { a; b; }
+        let mut parser = Parser::new(vec![
+            Token::If,
+            Token::Ident("a".to_string()),
+            Token::GreaterThan,
+            Token::Ident("b".to_string()),
+            Token::OpenCurly,
+            Token::Ident("a".to_string()),
+            Token::SemiColon,
+            Token::Ident("b".to_string()),
+            Token::SemiColon,
+            Token::CloseCurly,
+        ]);
+        let expr = parser.parse().unwrap().unwrap();
+        assert_eq!(
+            expr,
             Expr::If(
                 Box::new(Expr::Binary(
                     super::BinaryOp::GreaterThan,
                     Box::new(Expr::Identifier("a".to_string())),
                     Box::new(Expr::Identifier("b".to_string()))
                 )),
-                Box::new(Expr::NumLit(42)),
-                Some(Box::new(Expr::If(
-                    Box::new(Expr::Binary(
-                        super::BinaryOp::LessThan,
-                        Box::new(Expr::Identifier("a".to_string())),
-                        Box::new(Expr::Identifier("b".to_string()))
-                    )),
-                    Box::new(Expr::NumLit(69)),
-                    Some(Box::new(Expr::NumLit(420)))
-                )))
+                Box::new(Expr::Block(vec![
+                    Expr::Identifier("a".to_string()),
+                    Expr::Identifier("b".to_string())
+                ])),
+                None
             )
         );
     }
@@ -672,5 +758,73 @@ mod tests {
         let mut parser = Parser::new(vec![Token::OpenCurly, Token::CloseCurly]);
         let expr = parser.parse().unwrap().unwrap();
         assert_eq!(expr, Expr::Block(vec![]));
+    }
+
+    #[test]
+    fn ab_block() {
+        let mut parser = Parser::new(vec![
+            Token::OpenCurly,
+            Token::Ident("a".to_string()),
+            Token::SemiColon,
+            Token::Ident("b".to_string()),
+            Token::SemiColon,
+            Token::CloseCurly,
+        ]);
+        let expr = parser.parse().unwrap().unwrap();
+        assert_eq!(
+            expr,
+            Expr::Block(vec![
+                Expr::Identifier("a".to_string()),
+                Expr::Identifier("b".to_string())
+            ])
+        );
+    }
+
+    #[test]
+    fn simple_while_expr() {
+        // while a > b { a; }
+        let mut parser = Parser::new(vec![
+            Token::While,
+            Token::Ident("a".to_string()),
+            Token::GreaterThan,
+            Token::Ident("b".to_string()),
+            Token::OpenCurly,
+            Token::Ident("a".to_string()),
+            Token::SemiColon,
+            Token::CloseCurly,
+        ]);
+        let expr = parser.parse().unwrap().unwrap();
+        assert_eq!(
+            expr,
+            while_expr(
+                binary(BinaryOp::GreaterThan, iden("a"), iden("b")),
+                block(&[iden("a")])
+            )
+        )
+    }
+
+    #[test]
+    fn complex_while() {
+        // while a > b { a; b; }
+        let mut parser = Parser::new(vec![
+            Token::While,
+            Token::Ident("a".to_string()),
+            Token::GreaterThan,
+            Token::Ident("b".to_string()),
+            Token::OpenCurly,
+            Token::Ident("a".to_string()),
+            Token::SemiColon,
+            Token::Ident("b".to_string()),
+            Token::SemiColon,
+            Token::CloseCurly,
+        ]);
+        let expr = parser.parse().unwrap().unwrap();
+        assert_eq!(
+            expr,
+            while_expr(
+                binary(BinaryOp::GreaterThan, iden("a"), iden("b")),
+                block(&[iden("a"), iden("b")])
+            )
+        )
     }
 }
