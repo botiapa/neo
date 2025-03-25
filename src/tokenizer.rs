@@ -49,7 +49,7 @@ pub(crate) fn tokenize(inp: &str) -> Result<Vec<Token>, String> {
             '{' => Some(Token::OpenCurly),
             '}' => Some(Token::CloseCurly),
             '=' | '<' | '>' => Some(tokenize_comp(&mut i, &mut stack, &inp)?),
-            '\n' => None,
+            '\n' | '\r' => None,
             'a'..='z' | 'A'..='Z' => Some(tokenize_multi_char(&mut i, &mut stack, &inp)),
             c => return Err(format!("Unimplemented char: {}", c)),
         };
@@ -321,6 +321,25 @@ mod tests {
                 Token::NumLiteral(420),
                 Token::SemiColon,
                 Token::CloseCurly,
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn tokenize_windows_newline() -> Result<(), String> {
+        let inp = "2\r\n5 / 3 + 4\r\n4";
+        let tokens = tokenize(inp)?;
+        assert_eq!(
+            tokens,
+            vec![
+                Token::NumLiteral(2),
+                Token::NumLiteral(5),
+                Token::Div,
+                Token::NumLiteral(3),
+                Token::Plus,
+                Token::NumLiteral(4),
+                Token::NumLiteral(4)
             ]
         );
         Ok(())
