@@ -479,7 +479,7 @@ mod tests {
     fn parse_single_expr() {
         let mut parser = Parser::new(vec![Token::NumLiteral(42)]);
         let expr = parser.parse().unwrap().unwrap();
-        assert_eq!(expr, Expr::NumLit(42));
+        assert_eq!(expr, num_lit(42));
     }
 
     #[test]
@@ -490,14 +490,7 @@ mod tests {
             Token::NumLiteral(2),
         ]);
         let expr = parser.parse().unwrap().unwrap();
-        assert_eq!(
-            expr,
-            Expr::Binary(
-                BinaryOp::Add,
-                Box::new(Expr::NumLit(1)),
-                Box::new(Expr::NumLit(2))
-            )
-        );
+        assert_eq!(expr, binary(BinaryOp::Add, num_lit(1), num_lit(2)));
     }
 
     #[test]
@@ -512,10 +505,7 @@ mod tests {
             Token::CloseCurly,
         ]);
         let expr = parser.parse().unwrap().unwrap();
-        assert_eq!(
-            expr,
-            Expr::Block(vec![Expr::NumLit(1), Expr::NumLit(2), Expr::NumLit(3)])
-        );
+        assert_eq!(expr, block(&[num_lit(1), num_lit(2), num_lit(3)]));
     }
 
     #[test]
@@ -526,10 +516,7 @@ mod tests {
             Token::NumLiteral(42),
         ]);
         let expr = parser.parse().unwrap().unwrap();
-        assert_eq!(
-            expr,
-            Expr::Assignment("a".to_string(), Box::new(Expr::NumLit(42)))
-        );
+        assert_eq!(expr, assignment("a".to_string(), num_lit(42)));
     }
 
     #[test]
@@ -544,10 +531,7 @@ mod tests {
         let expr = parser.parse().unwrap().unwrap();
         assert_eq!(
             expr,
-            Expr::Block(vec![
-                Expr::Assignment("a".to_string(), Box::new(Expr::NumLit(42))),
-                Expr::Identifier("a".to_string())
-            ])
+            block(&[assignment("a".to_string(), num_lit(42)), iden("a")])
         );
     }
 
@@ -559,14 +543,7 @@ mod tests {
             Token::NumLiteral(2),
         ]);
         let expr = parser.parse().unwrap().unwrap();
-        assert_eq!(
-            expr,
-            Expr::Binary(
-                super::BinaryOp::Equal,
-                Box::new(Expr::NumLit(1)),
-                Box::new(Expr::NumLit(2))
-            )
-        );
+        assert_eq!(expr, binary(BinaryOp::Equal, num_lit(1), num_lit(2)));
     }
 
     #[test]
@@ -583,18 +560,10 @@ mod tests {
         let expr = parser.parse().unwrap().unwrap();
         assert_eq!(
             expr,
-            Expr::Binary(
+            binary(
                 BinaryOp::Equal,
-                Box::new(Expr::Binary(
-                    super::BinaryOp::Add,
-                    Box::new(Expr::NumLit(1)),
-                    Box::new(Expr::NumLit(1))
-                )),
-                Box::new(Expr::Binary(
-                    super::BinaryOp::Add,
-                    Box::new(Expr::NumLit(1)),
-                    Box::new(Expr::NumLit(1))
-                )),
+                binary(BinaryOp::Add, num_lit(1), num_lit(1)),
+                binary(BinaryOp::Add, num_lit(1), num_lit(1))
             )
         );
     }
@@ -639,13 +608,9 @@ mod tests {
         let expr = parser.parse().unwrap().unwrap();
         assert_eq!(
             expr,
-            Expr::If(
-                Box::new(Expr::Binary(
-                    super::BinaryOp::GreaterThan,
-                    Box::new(Expr::Identifier("a".to_string())),
-                    Box::new(Expr::Identifier("b".to_string())),
-                )),
-                Box::new(Expr::Block(vec![Expr::Identifier("a".to_string())])),
+            if_expr(
+                binary(BinaryOp::GreaterThan, iden("a"), iden("b")),
+                block(&[iden("a")]),
                 None
             )
         );
@@ -738,16 +703,9 @@ mod tests {
         let expr = parser.parse().unwrap().unwrap();
         assert_eq!(
             expr,
-            Expr::If(
-                Box::new(Expr::Binary(
-                    super::BinaryOp::GreaterThan,
-                    Box::new(Expr::Identifier("a".to_string())),
-                    Box::new(Expr::Identifier("b".to_string()))
-                )),
-                Box::new(Expr::Block(vec![
-                    Expr::Identifier("a".to_string()),
-                    Expr::Identifier("b".to_string())
-                ])),
+            if_expr(
+                binary(BinaryOp::GreaterThan, iden("a"), iden("b")),
+                block(&[iden("a"), iden("b")]),
                 None
             )
         );
@@ -757,7 +715,7 @@ mod tests {
     fn empty_block() {
         let mut parser = Parser::new(vec![Token::OpenCurly, Token::CloseCurly]);
         let expr = parser.parse().unwrap().unwrap();
-        assert_eq!(expr, Expr::Block(vec![]));
+        assert_eq!(expr, block(&[]));
     }
 
     #[test]
@@ -771,13 +729,7 @@ mod tests {
             Token::CloseCurly,
         ]);
         let expr = parser.parse().unwrap().unwrap();
-        assert_eq!(
-            expr,
-            Expr::Block(vec![
-                Expr::Identifier("a".to_string()),
-                Expr::Identifier("b".to_string())
-            ])
-        );
+        assert_eq!(expr, block(&[iden("a"), iden("b")]));
     }
 
     #[test]
