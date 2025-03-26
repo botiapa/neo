@@ -32,7 +32,7 @@ pub(crate) enum Expr {
     Binary(BinaryOp, Box<Expr>, Box<Expr>),
     Function(Token, Vec<Expr>),
     Block(Vec<Expr>),
-    Assignment(String, Box<Expr>),
+    Assignment(String, Box<Expr>, Option<String>),
     If(Box<Expr>, Box<Expr>, Option<Box<Expr>>),
     While(Box<Expr>, Box<Expr>),
     NoOp,
@@ -77,7 +77,11 @@ pub(crate) mod helpers {
     }
 
     pub(crate) fn assignment(id: String, expr: Expr) -> Expr {
-        Expr::Assignment(id, Box::new(expr))
+        Expr::Assignment(id, Box::new(expr), None)
+    }
+
+    pub(crate) fn assignment_typed(id: String, expr: Expr, var_type: String) -> Expr {
+        Expr::Assignment(id, Box::new(expr), Some(var_type))
     }
 
     pub(crate) fn if_expr(cond: Expr, then: Expr, else_block: Option<Expr>) -> Expr {
@@ -243,17 +247,35 @@ impl Parser {
             left @ _ => return left,
         };
         trace!("Parsed: {:?}", left);
+
+        let var_type = match self.peek() {
+            Some(Token::Colon) => {
+                self.consume();
+                let right = match self.parse_comp() {
+                    Ok(Some(Expr::Identifier(id))) => id,
+                    expr @ _ => return Err(format!("Expected type after ':', got {:?}", expr)),
+                };
+                Some(right)
+            }
+            _ => None,
+        };
+
         if let Some(Token::Assign) = self.consume() {
             if let Expr::Identifier(id) = left {
                 let right = match self.parse_comp() {
                     Ok(Some(expr)) => expr,
                     expr @ _ => return expr,
                 };
-                return Ok(Some(Expr::Assignment(id, Box::new(right))));
+                return Ok(Some(Expr::Assignment(id, Box::new(right), var_type)));
             } else {
                 return Err(format!("Invalid left-hand side of assignment: {:?}", left));
             }
         }
+
+        if let Some(var_type) = var_type {
+            return Err(format!("Expected assignment after ':', got {:?}", var_type));
+        }
+
         self.pos = start;
         self.parse_comp()
     }
@@ -789,5 +811,32 @@ mod tests {
         let mut parser = Parser::new(vec![Token::Negate, Token::BoolLiteral(true)]);
         let expr = parser.parse().unwrap().unwrap();
         assert_eq!(expr, unary(UnaryOp::Negate, bool_lit(true)));
+    }
+
+    #[test]
+    fn typed_assignment_invalid() {
+        let mut parser = Parser::new(vec![
+            Token::Ident("a".to_string()),
+            Token::Colon,
+            Token::Ident("int".to_string()),
+        ]);
+        let expr = parser.parse();
+        assert!(expr.is_err()); // no null values allowed
+    }
+
+    #[test]
+    fn typed_assignment_valid() {
+        let mut parser = Parser::new(vec![
+            Token::Ident("a".to_string()),
+            Token::Colon,
+            Token::Ident("int".to_string()),
+            Token::Assign,
+            Token::NumLiteral(42),
+        ]);
+        let expr = parser.parse().unwrap().unwrap();
+        assert_eq!(
+            expr,
+            assignment_typed("a".to_string(), num_lit(42), "int".to_string())
+        );
     }
 }

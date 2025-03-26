@@ -14,19 +14,41 @@ use crate::{
 pub(crate) struct Variable {
     value: Option<Expr>,
     mutable: bool,
+    var_type: Option<Type>,
 }
 
 impl Variable {
-    fn new_mutable(value: Option<Expr>) -> Self {
-        Self {
+    fn new_mutable(value: Option<Expr>) -> Option<Self> {
+        Some(Self {
             value,
+            var_type: None,
             mutable: true,
-        }
+        })
     }
 
-    fn set_value(&mut self, value: Expr) -> Expr {
+    fn new_mutable_typed(value: Option<Expr>, var_type: Type) -> Result<Self, String> {
+        if let Some(value) = &value {
+            let new_type = Type::expr_type(&value).ok_or("Cannot infer type")?;
+            if var_type != new_type {
+                return Err(format!("Expected type {:?}, got {:?}", var_type, new_type));
+            }
+        }
+        Ok(Self {
+            value,
+            var_type: Some(var_type),
+            mutable: true,
+        })
+    }
+
+    fn set_value(&mut self, value: Expr) -> Result<Expr, String> {
+        if let Some(var_type) = &self.var_type {
+            let new_type = Type::expr_type(&value).ok_or("Cannot infer type")?;
+            if var_type != &new_type {
+                return Err(format!("Expected type {:?}, got {:?}", var_type, new_type));
+            }
+        }
         self.value = Some(value.clone());
-        value
+        Ok(value)
     }
 
     fn get_value(&self) -> Option<Expr> {
@@ -35,15 +57,40 @@ impl Variable {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Type {
+    Int,
+    String,
+    Bool,
+    Function(Vec<Type>),
+}
+
+impl Type {
+    fn expr_type(expr: &Expr) -> Option<Type> {
+        match expr {
+            Expr::NumLit(_) => Some(Type::Int),
+            Expr::StringLit(_) => Some(Type::String),
+            Expr::BoolLit(_) => Some(Type::Bool),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Context {
     vars: Vec<HashMap<String, Variable>>,
+    types: HashMap<String, Type>,
     stdout: Vec<String>,
 }
 
 impl Context {
     pub(crate) fn new() -> Self {
+        let mut types = HashMap::new();
+        for (name, type_) in Self::DEFAULT_TYPES {
+            types.insert(name.to_string(), type_.clone());
+        }
         Self {
             vars: vec![HashMap::new()],
+            types,
             stdout: Vec::new(),
         }
     }
@@ -63,16 +110,47 @@ impl Context {
             .find_map(|vars| vars.get_mut(name))
     }
 
-    pub(crate) fn set_var(&mut self, name: &String, value: Expr) -> Result<Expr, String> {
+    pub(crate) fn set_var(
+        &mut self,
+        name: &String,
+        value: Expr,
+        var_type: Option<String>,
+    ) -> Result<Expr, String> {
+        let new_var_type = match var_type {
+            Some(var_type) => Some(
+                self.types
+                    .get(&var_type)
+                    .ok_or(format!("Invalid type: {}", var_type))?
+                    .clone(),
+            ),
+            None => None,
+        };
+
         if let Some(var) = self.get_var_mut(name) {
             trace!("Set variable({}) to {:?}", name, value);
             if !var.mutable {
                 return Err(format!("Cannot mutate immutable variable: {}", name));
             }
-            Ok(var.set_value(value))
+            if let Some(var_type) = new_var_type {
+                if Some(var_type) != var.var_type {
+                    return Err(format!(
+                        "Cannot reassign variable({}) to {:?} (invalid type?)",
+                        name, value
+                    ));
+                }
+            }
+            var.set_value(value)
         } else {
             trace!("Set new variable({}) to {:?}", name, value);
-            let var = Variable::new_mutable(Some(value.clone()));
+            let var = match new_var_type {
+                Some(var_type) => {
+                    Variable::new_mutable_typed(Some(value.clone()), var_type.clone())?
+                }
+                None => Variable::new_mutable(Some(value.clone())).ok_or(format!(
+                    "Cannot set variable({}) to {:?} (invalid type?)",
+                    name, value
+                ))?,
+            };
             self.vars.last_mut().unwrap().insert(name.to_string(), var);
             Ok(value)
         }
@@ -89,6 +167,12 @@ impl Context {
         println!();
         Ok(())
     }
+
+    const DEFAULT_TYPES: [(&'static str, Type); 3] = [
+        ("int", Type::Int),
+        ("string", Type::String),
+        ("bool", Type::Bool),
+    ];
 }
 
 pub(crate) fn interpret(c: &mut Context, expr: Expr) -> Result<Expr, String> {
@@ -122,7 +206,9 @@ pub(crate) fn interpret(c: &mut Context, expr: Expr) -> Result<Expr, String> {
         }
         Expr::NumLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => Ok(expr),
         Expr::Identifier(var_name) => interpret_identifier(c, var_name),
-        Expr::Assignment(var_name, value) => interpret_assignment(c, var_name, *value),
+        Expr::Assignment(var_name, value, var_type) => {
+            interpret_assignment(c, var_name, *value, var_type)
+        }
         Expr::If(cond, then, else_) => interpret_if(c, *cond, *then, else_.map(|e| *e)),
         Expr::While(cond, body) => interpet_while(c, *cond, *body),
         expr => unimplemented!("{:?}", expr),
@@ -177,9 +263,14 @@ fn interpret_identifier(c: &mut Context, var_name: String) -> Result<Expr, Strin
     expect_literal(c, v)
 }
 
-fn interpret_assignment(c: &mut Context, var_name: String, value: Expr) -> Result<Expr, String> {
+fn interpret_assignment(
+    c: &mut Context,
+    var_name: String,
+    value: Expr,
+    var_type: Option<String>,
+) -> Result<Expr, String> {
     let lit = expect_literal(c, value)?;
-    c.set_var(&var_name, lit)
+    c.set_var(&var_name, lit, var_type)
 }
 
 fn interpret_base_function(c: &mut Context, name: &str, args: Vec<Expr>) -> Result<Expr, String> {
@@ -396,6 +487,39 @@ mod tests {
             ]),
         );
         assert!(res.is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn typed_assignment() -> Result<(), String> {
+        let mut c = Context::new();
+        let res = interpret(
+            &mut c,
+            helpers::assignment_typed("a".to_string(), num_lit(42), "int".to_string()),
+        )?;
+        assert_eq!(res, num_lit(42));
+        Ok(())
+    }
+
+    #[test]
+    fn typed_assignment_invalid() -> Result<(), String> {
+        let mut c = Context::new();
+        let res = interpret(
+            &mut c,
+            helpers::assignment_typed("a".to_string(), num_lit(42), "string".to_string()),
+        );
+        assert!(res.is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn typed_reassignment() -> Result<(), String> {
+        let mut c = Context::new();
+        let res = interpret(
+            &mut c,
+            helpers::assignment_typed("a".to_string(), num_lit(42), "int".to_string()),
+        )?;
+        assert_eq!(res, num_lit(42));
         Ok(())
     }
 }

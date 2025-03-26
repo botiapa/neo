@@ -25,6 +25,7 @@ pub(crate) enum Token {
     Else,
     While,
     Negate,
+    Colon,
     Ident(String),
 }
 
@@ -37,7 +38,7 @@ pub(crate) fn tokenize(inp: &str) -> Result<Vec<Token>, String> {
     while i < inp.len() {
         let c = inp[i];
         let token = match c {
-            '0'..'9' => Some(tokenize_num(&mut i, &mut stack, &inp)?),
+            '0'..='9' => Some(tokenize_num(&mut i, &mut stack, &inp)?),
             '"' => Some(tokenize_string(&mut i, &mut stack, &inp)?),
             '(' => Some(Token::LeftPar),
             ')' => Some(Token::RightPar),
@@ -53,6 +54,7 @@ pub(crate) fn tokenize(inp: &str) -> Result<Vec<Token>, String> {
             }
             ' ' => None,
             ',' => Some(Token::Comma),
+            ':' => Some(Token::Colon),
             ';' => Some(Token::SemiColon),
             '{' => Some(Token::OpenCurly),
             '}' => Some(Token::CloseCurly),
@@ -493,6 +495,21 @@ mod tests {
                 Token::NumLiteral(1),
                 Token::SemiColon,
                 Token::CloseCurly,
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn tokenize_colon() -> Result<(), String> {
+        let inp = "a:int";
+        let tokens = tokenize(inp)?;
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Ident("a".to_string()),
+                Token::Colon,
+                Token::Ident("int".to_string())
             ]
         );
         Ok(())
