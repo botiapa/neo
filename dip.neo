@@ -1,0 +1,3 @@
+pack dip(n: drip) fr? n be 0 1 nah n * dip(n glowdown 1);
+yap(dip(5));
+

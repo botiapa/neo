@@ -30,11 +30,12 @@ pub(crate) enum Expr {
     Identifier(String),
     Unary(UnaryOp, Box<Expr>),
     Binary(BinaryOp, Box<Expr>, Box<Expr>),
-    Function(Token, Vec<Expr>),
+    FunctionCall(Token, Vec<Expr>),
     Block(Vec<Expr>),
     Assignment(String, Box<Expr>, Option<String>),
     If(Box<Expr>, Box<Expr>, Option<Box<Expr>>),
     While(Box<Expr>, Box<Expr>),
+    FunctionDeclaration(String, Vec<(String, Option<String>)>, Box<Expr>),
     NoOp,
 }
 
@@ -69,7 +70,11 @@ pub(crate) mod helpers {
     }
 
     pub(crate) fn function(name: Token, args: Vec<Expr>) -> Expr {
-        Expr::Function(name, args)
+        Expr::FunctionCall(name, args)
+    }
+
+    pub(crate) fn function_call(name: String, args: Vec<Expr>) -> Expr {
+        Expr::FunctionCall(Token::Ident(name), args)
     }
 
     pub(crate) fn block(exprs: &[Expr]) -> Expr {
@@ -94,6 +99,14 @@ pub(crate) mod helpers {
 
     pub(crate) fn no_op() -> Expr {
         Expr::NoOp
+    }
+
+    pub(crate) fn function_declaration(
+        name: String,
+        args: Vec<(String, Option<String>)>,
+        body: Expr,
+    ) -> Expr {
+        Expr::FunctionDeclaration(name, args, Box::new(body))
     }
 }
 
@@ -233,6 +246,64 @@ impl Parser {
                 )));
             } else {
                 return Ok(Some(Expr::If(Box::new(cond), Box::new(then), None)));
+            }
+        }
+        self.pos = start;
+        self.parse_function_declaration()
+    }
+
+    #[instrument(level = "trace", skip_all)]
+    fn parse_function_declaration(&mut self) -> Result<Option<Expr>, String> {
+        let start = self.pos;
+        if let Some(Token::Function) = self.consume() {
+            trace!("Parsed function declaration");
+            let name = match self.consume() {
+                Some(Token::Ident(name)) => name,
+                _ => return Err("Expected function name".to_string()),
+            };
+
+            trace!("Parsed function name: {:?}", name);
+            if let Some(Token::LeftPar) = self.consume() {
+            } else {
+                return Err("Expected '(' after function name".to_string());
+            }
+
+            // parse args
+            let mut args = Vec::new();
+            trace!("Parsing function args");
+            while self.peek() != Some(Token::RightPar) {
+                trace!(
+                    "Parsing function arg, remaining tokens: {:?}",
+                    self.tokens.iter().skip(self.pos).collect::<Vec<_>>()
+                );
+                if let Some(Token::Ident(id)) = self.peek() {
+                    self.consume();
+                    if let Some(Token::Colon) = self.peek() {
+                        self.consume();
+                        let var_type = match self.parse_expr() {
+                            Ok(Some(Expr::Identifier(var_type))) => var_type,
+                            _ => return Err("Expected type after ':'".to_string()),
+                        };
+                        args.push((id, Some(var_type)));
+                    } else {
+                        args.push((id, None));
+                    }
+                }
+                if let Some(Token::Comma) = self.peek() {
+                    self.consume();
+                } else {
+                    if let Some(Token::RightPar) = self.peek() {
+                    } else {
+                        return Err("Expected ')' after last arg".to_string());
+                    }
+                }
+            }
+            self.consume();
+            let body = self.parse_block()?;
+            if let Some(body) = body {
+                return Ok(Some(Expr::FunctionDeclaration(name, args, Box::new(body))));
+            } else {
+                return Err("Expected expression after ')'".to_string());
             }
         }
         self.pos = start;
@@ -379,7 +450,7 @@ impl Parser {
     }
 
     fn parse_primary(&mut self) -> Result<Option<Expr>, String> {
-        if let Ok(Some(expr)) = self.parse_function() {
+        if let Ok(Some(expr)) = self.parse_function_call() {
             return Ok(Some(expr));
         }
 
@@ -406,7 +477,7 @@ impl Parser {
         Ok(Some(expr))
     }
 
-    fn parse_function(&mut self) -> Result<Option<Expr>, String> {
+    fn parse_function_call(&mut self) -> Result<Option<Expr>, String> {
         let start = self.pos;
         if let Some(Token::Ident(fn_name)) = self.consume() {
             if let Some(Token::LeftPar) = self.consume() {
@@ -423,7 +494,7 @@ impl Parser {
                     }
                 }
                 if let Some(Token::RightPar) = self.consume() {
-                    return Ok(Some(Expr::Function(Token::Ident(fn_name), args)));
+                    return Ok(Some(Expr::FunctionCall(Token::Ident(fn_name), args)));
                 }
                 return Err("Expected ')' after function arguments".to_string());
             }
@@ -837,6 +908,75 @@ mod tests {
         assert_eq!(
             expr,
             assignment_typed("a".to_string(), num_lit(42), "int".to_string())
+        );
+    }
+
+    #[test]
+    fn simple_function_declaration() {
+        let mut parser = Parser::new(vec![
+            Token::Function,
+            Token::Ident("a".to_string()),
+            Token::LeftPar,
+            Token::Ident("b".to_string()),
+            Token::Colon,
+            Token::Ident("int".to_string()),
+            Token::RightPar,
+            Token::OpenCurly,
+            Token::CloseCurly,
+        ]);
+        let expr = parser.parse().unwrap().unwrap();
+        assert_eq!(
+            expr,
+            function_declaration(
+                "a".to_string(),
+                vec![("b".to_string(), Some("int".to_string()))],
+                block(&[])
+            )
+        );
+    }
+
+    #[test]
+    fn function_declaration_noblock() {
+        let mut parser = Parser::new(vec![
+            Token::Function,
+            Token::Ident("a".to_string()),
+            Token::LeftPar,
+            Token::RightPar,
+            Token::Ident("a".to_string()),
+        ]);
+        let expr = parser.parse().unwrap().unwrap();
+        assert_eq!(
+            expr,
+            function_declaration("a".to_string(), vec![], iden("a"))
+        );
+    }
+
+    #[test]
+    fn function_declaration_multiple_args() {
+        let mut parser = Parser::new(vec![
+            Token::Function,
+            Token::Ident("a".to_string()),
+            Token::LeftPar,
+            Token::Ident("b".to_string()),
+            Token::Colon,
+            Token::Ident("int".to_string()),
+            Token::Comma,
+            Token::Ident("c".to_string()),
+            Token::RightPar,
+            Token::OpenCurly,
+            Token::CloseCurly,
+        ]);
+        let expr = parser.parse().unwrap().unwrap();
+        assert_eq!(
+            expr,
+            function_declaration(
+                "a".to_string(),
+                vec![
+                    ("b".to_string(), Some("int".to_string())),
+                    ("c".to_string(), None)
+                ],
+                block(&[])
+            )
         );
     }
 }

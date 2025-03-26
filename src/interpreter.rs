@@ -30,7 +30,8 @@ impl Variable {
 
     fn new_mutable_typed(value: Option<Expr>, var_type: Type) -> Result<Self, String> {
         if let Some(value) = &value {
-            let new_type = Type::expr_type(&value).ok_or("Cannot infer type")?;
+            let new_type = Type::expr_type(&value)
+                .ok_or_else(|| format!("Cannot infer type of {:?}", value))?;
             if var_type != new_type {
                 return Err(format!("Expected type {:?}, got {:?}", var_type, new_type));
             }
@@ -63,7 +64,6 @@ pub(crate) enum Type {
     Int,
     String,
     Bool,
-    Function(Vec<Type>),
 }
 
 impl Display for Type {
@@ -84,8 +84,15 @@ impl Type {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Function {
+    args: Vec<(String, Option<Type>)>,
+    body: Expr,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Context {
     vars: Vec<HashMap<String, Variable>>,
+    functions: HashMap<String, Function>,
     types: HashMap<String, Type>,
     stdout: Vec<String>,
 }
@@ -98,6 +105,7 @@ impl Context {
         }
         Self {
             vars: vec![HashMap::new()],
+            functions: HashMap::new(),
             types,
             stdout: Vec::new(),
         }
@@ -176,10 +184,11 @@ impl Context {
         Ok(())
     }
 
-    const DEFAULT_TYPES: [(&'static str, Type); 3] = [
+    const DEFAULT_TYPES: [(&'static str, Type); 4] = [
         ("int", Type::Int),
         ("string", Type::String),
         ("bool", Type::Bool),
+        ("drip", Type::Int),
     ];
 }
 
@@ -202,7 +211,12 @@ pub(crate) fn interpret(c: &mut Context, expr: Expr) -> Result<Expr, String> {
             BinaryOp::LessOrEqualThan => binary_comp_op(c, i32::le, *a, *b),
             BinaryOp::Equal => binary_comp_op(c, i32::eq, *a, *b),
         },
-        Expr::Function(Token::Ident(fn_name), args) => interpret_base_function(c, &fn_name, args),
+        Expr::FunctionCall(Token::Ident(fn_name), args) => {
+            interpret_function_call(c, &fn_name, args)
+        }
+        Expr::FunctionDeclaration(name, args, body) => {
+            interpret_function_declaration(c, &name, args, *body)
+        }
         Expr::Block(expressions) => {
             let mut last = Expr::NoOp;
             c.vars.push(HashMap::new());
@@ -281,12 +295,67 @@ fn interpret_assignment(
     c.set_var(&var_name, lit, var_type)
 }
 
-fn interpret_base_function(c: &mut Context, name: &str, args: Vec<Expr>) -> Result<Expr, String> {
+fn interpret_function_call(c: &mut Context, name: &str, args: Vec<Expr>) -> Result<Expr, String> {
     match name {
         "yap" => yap(c, args.get(0).ok_or("Expected an argument")?),
         "vibe" => vibe(c, args.get(0).ok_or("Expected an argument")?),
-        _ => unimplemented!(),
+        fn_name => {
+            let func = c
+                .functions
+                .get(fn_name)
+                .ok_or(format!("Function({}) not found", fn_name))?
+                .clone();
+            if func.args.len() != args.len() {
+                return Err(format!(
+                    "Expected {} arguments, got {}",
+                    func.args.len(),
+                    args.len()
+                ));
+            }
+
+            // create a new scope for the function
+            let mut vars = HashMap::new();
+            for (i, (arg_name, arg_type)) in func.args.iter().enumerate() {
+                let arg = args.get(i).ok_or("Expected an argument")?;
+                let arg = expect_literal(c, arg.clone())?;
+                let var = match arg_type {
+                    Some(arg_type) => Variable::new_mutable_typed(Some(arg), arg_type.clone())?,
+                    None => Variable::new_mutable(Some(arg)).unwrap(),
+                };
+                vars.insert(arg_name.clone(), var);
+            }
+            c.vars.push(vars);
+            trace!("Interpreting function({}) with args: {:?}", name, args);
+            let res = interpret(c, func.body.clone())?;
+            c.vars.pop();
+            Ok(res)
+        }
     }
+}
+
+fn interpret_function_declaration(
+    c: &mut Context,
+    name: &str,
+    args: Vec<(String, Option<String>)>,
+    body: Expr,
+) -> Result<Expr, String> {
+    let args = args
+        .into_iter()
+        .map(|(name, var_type)| {
+            (
+                name,
+                var_type.map(|t| {
+                    c.types
+                        .get(&t)
+                        .expect(format!("Invalid type: {}", t).as_str())
+                        .clone()
+                }),
+            )
+        })
+        .collect();
+    c.functions
+        .insert(name.to_string(), Function { args, body });
+    Ok(Expr::NoOp)
 }
 
 fn expect_numlit(c: &mut Context, expr: Expr) -> Result<Expr, String> {
@@ -587,6 +656,97 @@ mod tests {
             binary(BinaryOp::Add, string_lit("hello".to_string()), num_lit(1)),
         )?;
         assert_eq!(res, string_lit("hello1".to_string()));
+        Ok(())
+    }
+
+    #[test]
+    fn custom_function() -> Result<(), String> {
+        let mut c = Context::new();
+        let res = interpret(
+            &mut c,
+            helpers::function_declaration(
+                "add".to_string(),
+                vec![("a".to_string(), Some("int".to_string()))],
+                iden("a"),
+            ),
+        )?;
+        assert_eq!(res, helpers::no_op());
+        let res = interpret(
+            &mut c,
+            helpers::function_call("add".to_string(), vec![num_lit(1)]),
+        )?;
+        assert_eq!(res, num_lit(1));
+        Ok(())
+    }
+
+    #[test]
+    fn function_call_wrong_arg_count() -> Result<(), String> {
+        let mut c = Context::new();
+        interpret(
+            &mut c,
+            helpers::function_declaration(
+                "add".to_string(),
+                vec![("a".to_string(), Some("int".to_string()))],
+                iden("a"),
+            ),
+        )
+        .unwrap();
+        let res = interpret(
+            &mut c,
+            helpers::function_call("add".to_string(), vec![num_lit(1), num_lit(2)]),
+        );
+        assert!(res.is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn function_call_wrong_arg_type() -> Result<(), String> {
+        let mut c = Context::new();
+        interpret(
+            &mut c,
+            helpers::function_declaration(
+                "add".to_string(),
+                vec![("a".to_string(), Some("int".to_string()))],
+                iden("a"),
+            ),
+        )
+        .unwrap();
+        let res = interpret(
+            &mut c,
+            helpers::function_call("add".to_string(), vec![string_lit("hello".to_string())]),
+        );
+        assert!(res.is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn recursive_function() -> Result<(), String> {
+        let mut c = Context::new();
+        let res = interpret(
+            &mut c,
+            helpers::function_declaration(
+                "fact".to_string(),
+                vec![("n".to_string(), Some("int".to_string()))],
+                helpers::if_expr(
+                    binary(BinaryOp::Equal, iden("n"), num_lit(0)),
+                    num_lit(1),
+                    Some(binary(
+                        BinaryOp::Mult,
+                        iden("n"),
+                        helpers::function_call(
+                            "fact".to_string(),
+                            vec![binary(BinaryOp::Sub, iden("n"), num_lit(1))],
+                        ),
+                    )),
+                ),
+            ),
+        )?;
+        assert_eq!(res, helpers::no_op());
+        let fact5 = interpret(
+            &mut c,
+            helpers::function_call("fact".to_string(), vec![num_lit(5)]),
+        )?;
+        assert_eq!(fact5, num_lit(120));
         Ok(())
     }
 }

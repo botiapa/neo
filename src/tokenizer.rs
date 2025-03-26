@@ -26,6 +26,7 @@ pub(crate) enum Token {
     While,
     Negate,
     Colon,
+    Function,
     Ident(String),
 }
 
@@ -155,10 +156,10 @@ fn built_in(s: &String) -> Option<Token> {
         "false" => Some(Token::BoolLiteral(false)),
         ">=" => Some(Token::GreaterOrEqualThan),
         "<=" => Some(Token::LessOrEqualThan),
-        "==" => Some(Token::Equal),
         "if" => Some(Token::If),
         "else" => Some(Token::Else),
         "while" => Some(Token::While),
+        "fn" => Some(Token::Function),
         _ => None,
     }
 }
@@ -172,6 +173,8 @@ fn built_in_cursed(s: &String) -> Option<Token> {
         "fr?" => Some(Token::If),
         "nah" => Some(Token::Else),
         "cook" => Some(Token::While),
+        "pack" => Some(Token::Function),
+        "be" => Some(Token::Equal),
         _ => None,
     }
 }
@@ -510,6 +513,33 @@ mod tests {
                 Token::Ident("a".to_string()),
                 Token::Colon,
                 Token::Ident("int".to_string())
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn tokenize_function() -> Result<(), String> {
+        let inp = "fn a(b:int) { b = b + 1; }";
+        let tokens = tokenize(inp)?;
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Function,
+                Token::Ident("a".to_string()),
+                Token::LeftPar,
+                Token::Ident("b".to_string()),
+                Token::Colon,
+                Token::Ident("int".to_string()),
+                Token::RightPar,
+                Token::OpenCurly,
+                Token::Ident("b".to_string()),
+                Token::Assign,
+                Token::Ident("b".to_string()),
+                Token::Plus,
+                Token::NumLiteral(1),
+                Token::SemiColon,
+                Token::CloseCurly,
             ]
         );
         Ok(())
