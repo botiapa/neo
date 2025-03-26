@@ -1,5 +1,7 @@
+use core::fmt;
 use std::{
     collections::HashMap,
+    fmt::Display,
     io::{self, Write, stdout},
 };
 
@@ -62,6 +64,12 @@ pub(crate) enum Type {
     String,
     Bool,
     Function(Vec<Type>),
+}
+
+impl Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 
 impl Type {
@@ -276,6 +284,7 @@ fn interpret_assignment(
 fn interpret_base_function(c: &mut Context, name: &str, args: Vec<Expr>) -> Result<Expr, String> {
     match name {
         "yap" => yap(c, args.get(0).ok_or("Expected an argument")?),
+        "vibe" => vibe(c, args.get(0).ok_or("Expected an argument")?),
         _ => unimplemented!(),
     }
 }
@@ -305,8 +314,9 @@ fn expect_literal(c: &mut Context, expr: Expr) -> Result<Expr, String> {
     }
 }
 
-fn yap(c: &mut Context, output: &Expr) -> Result<Expr, String> {
-    let arg = expect_literal(c, output.clone())?;
+/// Prints the argument to the stdout
+fn yap(c: &mut Context, p1: &Expr) -> Result<Expr, String> {
+    let arg = expect_literal(c, p1.clone())?;
     let s = match arg {
         Expr::NumLit(a) => a.to_string(),
         Expr::StringLit(s) => s,
@@ -321,21 +331,52 @@ fn yap(c: &mut Context, output: &Expr) -> Result<Expr, String> {
     Ok(Expr::NoOp)
 }
 
+/// Returns the argument's type as string
+fn vibe(c: &mut Context, p1: &Expr) -> Result<Expr, String> {
+    let arg = expect_literal(c, p1.clone())?;
+    match p1 {
+        Expr::Identifier(name) => {
+            let var = c
+                .get_var(name)
+                .ok_or(format!("Variable({}) not found", name))?;
+            Ok(Expr::StringLit(
+                var.var_type
+                    .as_ref()
+                    .map(|t| t.to_string())
+                    .unwrap_or("vibeless".to_string()),
+            ))
+        }
+        Expr::NumLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => {
+            Ok(Expr::StringLit(Type::expr_type(&arg).unwrap().to_string()))
+        }
+        _ => unimplemented!(),
+    }
+}
+
 fn binary_num_op(
     c: &mut Context,
     op_fn: impl Fn(i32, i32) -> i32,
     a: Expr,
     b: Expr,
 ) -> Result<Expr, String> {
-    let a = expect_numlit(c, a)?;
-    let b = expect_numlit(c, b)?;
-    if let (Expr::NumLit(a), Expr::NumLit(b)) = (&a, &b) {
-        return Ok(Expr::NumLit(op_fn(*a, *b)).into());
+    let a = expect_literal(c, a)?;
+    let b = expect_literal(c, b)?;
+    match (&a, &b) {
+        (Expr::NumLit(a), Expr::NumLit(b)) => Ok(Expr::NumLit(op_fn(*a, *b)).into()),
+        (Expr::NumLit(a), Expr::StringLit(b)) => {
+            Ok(Expr::StringLit(b.to_string() + &a.to_string()).into())
+        }
+        (Expr::StringLit(a), Expr::NumLit(b)) => {
+            Ok(Expr::StringLit(a.to_string() + &b.to_string()).into())
+        }
+        (Expr::StringLit(a), Expr::StringLit(b)) => {
+            Ok(Expr::StringLit(a.to_string() + &b.to_string()).into())
+        }
+        _ => Err(format!(
+            "Invalid operation, expected numbers, got {:?}",
+            (a, b)
+        )),
     }
-    Err(format!(
-        "Invalid operation, expected numbers, got {:?}",
-        (a, b)
-    ))
 }
 
 fn binary_comp_op(
@@ -520,6 +561,32 @@ mod tests {
             helpers::assignment_typed("a".to_string(), num_lit(42), "int".to_string()),
         )?;
         assert_eq!(res, num_lit(42));
+        Ok(())
+    }
+
+    #[test]
+    fn string_concat() -> Result<(), String> {
+        let mut c = Context::new();
+        let res = interpret(
+            &mut c,
+            binary(
+                BinaryOp::Add,
+                string_lit("hello".to_string()),
+                string_lit(" world".to_string()),
+            ),
+        )?;
+        assert_eq!(res, string_lit("hello world".to_string()));
+        Ok(())
+    }
+
+    #[test]
+    fn string_concat_num() -> Result<(), String> {
+        let mut c = Context::new();
+        let res = interpret(
+            &mut c,
+            binary(BinaryOp::Add, string_lit("hello".to_string()), num_lit(1)),
+        )?;
+        assert_eq!(res, string_lit("hello1".to_string()));
         Ok(())
     }
 }
