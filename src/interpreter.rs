@@ -266,33 +266,27 @@ fn binary_comp_op(
 
 #[cfg(test)]
 mod tests {
-    use crate::expression::helpers::{self, block, num_lit};
+    use crate::expression::helpers::{
+        self, binary, block, bool_lit, function, iden, num_lit, string_lit, unary, while_expr,
+    };
+    use crate::expression::{BinaryOp, UnaryOp};
+    use crate::tokenizer::Token;
 
     use super::*;
 
     #[test]
     fn add() -> Result<(), String> {
         let mut c = Context::new();
-        let res = interpret(
-            &mut c,
-            Expr::Binary(
-                BinaryOp::Add,
-                Box::new(Expr::NumLit(1)),
-                Box::new(Expr::NumLit(2)),
-            ),
-        )?;
-        assert_eq!(res, Expr::NumLit(3));
+        let res = interpret(&mut c, binary(BinaryOp::Add, num_lit(1), num_lit(2)))?;
+        assert_eq!(res, num_lit(3));
         Ok(())
     }
 
     #[test]
     fn assignment() -> Result<(), String> {
         let mut c = Context::new();
-        let res = interpret(
-            &mut c,
-            Expr::Assignment("a".to_string(), Box::new(Expr::NumLit(1))),
-        )?;
-        assert_eq!(res, Expr::NumLit(1));
+        let res = interpret(&mut c, helpers::assignment("a".to_string(), num_lit(1)))?;
+        assert_eq!(res, num_lit(1));
         Ok(())
     }
 
@@ -301,17 +295,13 @@ mod tests {
         let mut c = Context::new();
         let res = interpret(
             &mut c,
-            Expr::Block(vec![
-                Expr::Assignment("a".to_string(), Box::new(Expr::NumLit(1))),
-                Expr::Assignment("b".to_string(), Box::new(Expr::NumLit(2))),
-                Expr::Binary(
-                    BinaryOp::Add,
-                    Box::new(Expr::Identifier("a".to_string())),
-                    Box::new(Expr::Identifier("b".to_string())),
-                ),
+            block(&[
+                helpers::assignment("a".to_string(), num_lit(1)),
+                helpers::assignment("b".to_string(), num_lit(2)),
+                binary(BinaryOp::Add, iden("a"), iden("b")),
             ]),
         )?;
-        assert_eq!(res, Expr::NumLit(3));
+        assert_eq!(res, num_lit(3));
         Ok(())
     }
 
@@ -320,12 +310,12 @@ mod tests {
         let mut c = Context::new();
         let res = interpret(
             &mut c,
-            Expr::Function(
+            function(
                 Token::Ident("yap".to_string()),
-                vec![Expr::StringLit("hello".to_string())],
+                vec![string_lit("hello".to_string())],
             ),
         )?;
-        assert_eq!(res, Expr::NoOp);
+        assert_eq!(res, helpers::no_op());
         assert_eq!(c.stdout, vec!["hello".to_string()]);
         Ok(())
     }
@@ -336,29 +326,22 @@ mod tests {
         // a=b=1
         let res = interpret(
             &mut c,
-            Expr::Assignment(
+            helpers::assignment(
                 "a".to_string(),
-                Box::new(Expr::Assignment("b".to_string(), Box::new(Expr::NumLit(1)))),
+                helpers::assignment("b".to_string(), num_lit(1)),
             ),
         )?;
-        assert_eq!(res, Expr::NumLit(1));
-        assert_eq!(c.get_var_value("a"), Some(Expr::NumLit(1)));
-        assert_eq!(c.get_var_value("b"), Some(Expr::NumLit(1)));
+        assert_eq!(res, num_lit(1));
+        assert_eq!(c.get_var_value("a"), Some(num_lit(1)));
+        assert_eq!(c.get_var_value("b"), Some(num_lit(1)));
         Ok(())
     }
 
     #[test]
     fn if_expr() -> Result<(), String> {
         let mut c = Context::new();
-        let res = interpret(
-            &mut c,
-            Expr::If(
-                Box::new(Expr::BoolLit(true)),
-                Box::new(Expr::NumLit(1)),
-                None,
-            ),
-        )?;
-        assert_eq!(res, Expr::NumLit(1));
+        let res = interpret(&mut c, helpers::if_expr(bool_lit(true), num_lit(1), None))?;
+        assert_eq!(res, num_lit(1));
         Ok(())
     }
 
@@ -367,13 +350,9 @@ mod tests {
         let mut c = Context::new();
         let res = interpret(
             &mut c,
-            Expr::If(
-                Box::new(Expr::BoolLit(false)),
-                Box::new(Expr::NumLit(1)),
-                Some(Box::new(Expr::NumLit(2))),
-            ),
+            helpers::if_expr(bool_lit(false), num_lit(1), Some(num_lit(2))),
         )?;
-        assert_eq!(res, Expr::NumLit(2));
+        assert_eq!(res, num_lit(2));
         Ok(())
     }
 
@@ -382,38 +361,27 @@ mod tests {
         let mut c = Context::new();
         let res = interpret(
             &mut c,
-            Expr::Block(vec![
-                Expr::Assignment("a".to_string(), Box::new(Expr::NumLit(0))),
-                Expr::While(
-                    Box::new(Expr::Binary(
-                        BinaryOp::LessThan,
-                        Box::new(Expr::Identifier("a".to_string())),
-                        Box::new(Expr::NumLit(5)),
-                    )),
-                    Box::new(Expr::Assignment(
+            block(&[
+                helpers::assignment("a".to_string(), num_lit(0)),
+                while_expr(
+                    binary(BinaryOp::LessThan, iden("a"), num_lit(5)),
+                    helpers::assignment(
                         "a".to_string(),
-                        Box::new(Expr::Binary(
-                            BinaryOp::Add,
-                            Box::new(Expr::Identifier("a".to_string())),
-                            Box::new(Expr::NumLit(1)),
-                        )),
-                    )),
+                        binary(BinaryOp::Add, iden("a"), num_lit(1)),
+                    ),
                 ),
-                Expr::Identifier("a".to_string()),
+                iden("a"),
             ]),
         )?;
-        assert_eq!(res, Expr::NumLit(5));
+        assert_eq!(res, num_lit(5));
         Ok(())
     }
 
     #[test]
     fn negate() -> Result<(), String> {
         let mut c = Context::new();
-        let res = interpret(
-            &mut c,
-            Expr::Unary(UnaryOp::Negate, Box::new(Expr::BoolLit(true))),
-        )?;
-        assert_eq!(res, Expr::BoolLit(false));
+        let res = interpret(&mut c, unary(UnaryOp::Negate, bool_lit(true)))?;
+        assert_eq!(res, bool_lit(false));
         Ok(())
     }
 
@@ -423,8 +391,8 @@ mod tests {
         let res = interpret(
             &mut c,
             block(&[
-                block(&[helpers::assignment("a".into(), num_lit(42))]),
-                helpers::iden("a"),
+                block(&[helpers::assignment("a".to_string(), num_lit(42))]),
+                iden("a"),
             ]),
         );
         assert!(res.is_err());
