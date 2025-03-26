@@ -39,7 +39,7 @@ pub(crate) enum Expr {
 }
 
 #[allow(unused)]
-mod helpers {
+pub(crate) mod helpers {
     use crate::tokenizer::Token;
 
     use super::{BinaryOp, Expr, UnaryOp};

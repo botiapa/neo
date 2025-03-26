@@ -36,31 +36,44 @@ impl Variable {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Context {
-    vars: HashMap<String, Variable>,
+    vars: Vec<HashMap<String, Variable>>,
     stdout: Vec<String>,
 }
 
 impl Context {
     pub(crate) fn new() -> Self {
         Self {
-            vars: HashMap::new(),
+            vars: vec![HashMap::new()],
             stdout: Vec::new(),
         }
     }
 
-    pub(crate) fn get_var(&self, name: &str) -> Option<Expr> {
-        self.vars.get(name)?.get_value()
+    pub(crate) fn get_var_value(&self, name: &str) -> Option<Expr> {
+        self.get_var(name).map(|v| v.get_value())?
+    }
+
+    pub(crate) fn get_var(&self, name: &str) -> Option<&Variable> {
+        self.vars.iter().rev().find_map(|vars| vars.get(name))
+    }
+
+    pub(crate) fn get_var_mut(&mut self, name: &str) -> Option<&mut Variable> {
+        self.vars
+            .iter_mut()
+            .rev()
+            .find_map(|vars| vars.get_mut(name))
     }
 
     pub(crate) fn set_var(&mut self, name: &String, value: Expr) -> Result<Expr, String> {
-        if let Some(var) = self.vars.get_mut(name) {
+        if let Some(var) = self.get_var_mut(name) {
+            trace!("Set variable({}) to {:?}", name, value);
             if !var.mutable {
                 return Err(format!("Cannot mutate immutable variable: {}", name));
             }
             Ok(var.set_value(value))
         } else {
+            trace!("Set new variable({}) to {:?}", name, value);
             let var = Variable::new_mutable(Some(value.clone()));
-            self.vars.insert(name.to_string(), var);
+            self.vars.last_mut().unwrap().insert(name.to_string(), var);
             Ok(value)
         }
     }
@@ -100,9 +113,11 @@ pub(crate) fn interpret(c: &mut Context, expr: Expr) -> Result<Expr, String> {
         Expr::Function(Token::Ident(fn_name), args) => interpret_base_function(c, &fn_name, args),
         Expr::Block(expressions) => {
             let mut last = Expr::NoOp;
+            c.vars.push(HashMap::new());
             for expr in expressions {
                 last = interpret(c, expr.into())?;
             }
+            c.vars.pop();
             Ok(last)
         }
         Expr::NumLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => Ok(expr),
@@ -157,16 +172,14 @@ fn interpret_if(
 
 fn interpret_identifier(c: &mut Context, var_name: String) -> Result<Expr, String> {
     let v = c
-        .get_var(&var_name)
+        .get_var_value(&var_name)
         .ok_or(format!("variable({}) not set", var_name))?;
     expect_literal(c, v)
 }
 
 fn interpret_assignment(c: &mut Context, var_name: String, value: Expr) -> Result<Expr, String> {
     let lit = expect_literal(c, value)?;
-    let res = c.set_var(&var_name, lit)?;
-    trace!("Set variable({}) to {:?}", var_name, res);
-    Ok(res)
+    c.set_var(&var_name, lit)
 }
 
 fn interpret_base_function(c: &mut Context, name: &str, args: Vec<Expr>) -> Result<Expr, String> {
@@ -253,6 +266,8 @@ fn binary_comp_op(
 
 #[cfg(test)]
 mod tests {
+    use crate::expression::helpers::{self, block, num_lit};
+
     use super::*;
 
     #[test]
@@ -327,8 +342,8 @@ mod tests {
             ),
         )?;
         assert_eq!(res, Expr::NumLit(1));
-        assert_eq!(c.get_var("a"), Some(Expr::NumLit(1)));
-        assert_eq!(c.get_var("b"), Some(Expr::NumLit(1)));
+        assert_eq!(c.get_var_value("a"), Some(Expr::NumLit(1)));
+        assert_eq!(c.get_var_value("b"), Some(Expr::NumLit(1)));
         Ok(())
     }
 
@@ -384,10 +399,10 @@ mod tests {
                         )),
                     )),
                 ),
+                Expr::Identifier("a".to_string()),
             ]),
         )?;
         assert_eq!(res, Expr::NumLit(5));
-        assert_eq!(c.get_var("a"), Some(Expr::NumLit(5)));
         Ok(())
     }
 
@@ -399,6 +414,20 @@ mod tests {
             Expr::Unary(UnaryOp::Negate, Box::new(Expr::BoolLit(true))),
         )?;
         assert_eq!(res, Expr::BoolLit(false));
+        Ok(())
+    }
+
+    #[test]
+    fn local_scoped_variable() -> Result<(), String> {
+        let mut c = Context::new();
+        let res = interpret(
+            &mut c,
+            block(&[
+                block(&[helpers::assignment("a".into(), num_lit(42))]),
+                helpers::iden("a"),
+            ]),
+        );
+        assert!(res.is_err());
         Ok(())
     }
 }
