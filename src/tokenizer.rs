@@ -163,11 +163,13 @@ fn built_in(s: &String) -> Option<Token> {
 
 fn built_in_cursed(s: &String) -> Option<Token> {
     match s.to_lowercase().as_str() {
-        "ongod" => Some(Token::Assign),
+        "bet" => Some(Token::Assign),
         "glowup" => Some(Token::Plus),
         "glowdown" => Some(Token::Minus),
-        "nah" => Some(Token::Negate),
+        "cap" => Some(Token::Negate),
         "fr?" => Some(Token::If),
+        "nah" => Some(Token::Else),
+        "cook" => Some(Token::While),
         _ => None,
     }
 }
@@ -412,7 +414,7 @@ mod tests {
 
     #[test]
     fn tokenize_negate_cursed() -> Result<(), String> {
-        let inp = "nah true";
+        let inp = "cap true";
         let tokens = tokenize(inp)?;
         assert_eq!(tokens, vec![Token::Negate, Token::BoolLiteral(true)]);
         Ok(())
@@ -436,6 +438,59 @@ mod tests {
                 Token::Else,
                 Token::OpenCurly,
                 Token::NumLiteral(69),
+                Token::SemiColon,
+                Token::CloseCurly,
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn tokenize_assign() -> Result<(), String> {
+        let inp = "a bet 42";
+        let tokens = tokenize(inp)?;
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Ident("a".to_string()),
+                Token::Assign,
+                Token::NumLiteral(42)
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn tokenize_cursed_else() -> Result<(), String> {
+        let inp = "a nah 42";
+        let tokens = tokenize(inp)?;
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Ident("a".to_string()),
+                Token::Else,
+                Token::NumLiteral(42)
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn tokenize_cursed_while() -> Result<(), String> {
+        let inp = "a cook 42 { a = a + 1; }";
+        let tokens = tokenize(inp)?;
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Ident("a".to_string()),
+                Token::While,
+                Token::NumLiteral(42),
+                Token::OpenCurly,
+                Token::Ident("a".to_string()),
+                Token::Assign,
+                Token::Ident("a".to_string()),
+                Token::Plus,
+                Token::NumLiteral(1),
                 Token::SemiColon,
                 Token::CloseCurly,
             ]

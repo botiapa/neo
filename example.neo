@@ -1,10 +1,10 @@
-a onGod 42;
-b onGod 69;
+a bet 42;
+b bet 69;
 
-yap(fr? a > b {a} else if a < b {b} else {a glowUp b})
+yap(fr? a > b {a} nah fr? a < b {b} nah {a glowUp b})
 yap(" ")
 
 // this a bussing comment 
-c = 2
-i = 0
-yap(while i < 3 { i = i + 1; c = c * c; })
+c bet 2
+i bet 0
+yap(cook i < 3 { i = i + 1; c = c * c; })
