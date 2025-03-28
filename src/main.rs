@@ -6,7 +6,7 @@ use std::{
 };
 
 use expression::Parser;
-use interpreter::{Context, interpret};
+use interpreter::Context;
 use tokenizer::tokenize;
 use tracing_subscriber::EnvFilter;
 
@@ -39,7 +39,7 @@ fn interactive_mode() {
                 let mut parser = Parser::new(tokens);
                 match parser.parse() {
                     Ok(Some(expr)) => {
-                        let res = interpret(&mut context, expr);
+                        let res = context.interpret(expr);
                         match res {
                             Ok(res) => {
                                 context.flush_stdout().expect("Failed writing to stdout");
@@ -83,7 +83,7 @@ fn interpret_string(inp: &str) {
     let tokens = tokenize(&inp);
     let mut parser = Parser::new(tokens.unwrap());
     let expr = parser.parse().unwrap().unwrap();
-    let res = interpret(&mut context, expr);
+    let res = context.interpret(expr);
     context.flush_stdout().expect("Failed writing to stdout");
     match res {
         Ok(res) => println!("Result: {:?}", res),

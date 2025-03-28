@@ -45,7 +45,6 @@ pub(crate) enum Expr {
     NumLit(i32),
     StringLit(String),
     BoolLit(bool),
-    // Identifier(name, path)
     Identifier(String, Path),
     Unary(UnaryOp, Box<Expr>),
     Binary(BinaryOp, Box<Expr>, Box<Expr>),
