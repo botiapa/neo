@@ -1,14 +1,15 @@
 use core::fmt;
 use std::{
-    collections::HashMap,
-    fmt::Display,
+    collections::{HashMap, HashSet},
+    env::var,
+    fmt::{Display, format},
     io::{self, Write, stdout},
 };
 
 use tracing::trace;
 
 use crate::{
-    expression::{BinaryOp, Expr, UnaryOp},
+    expression::{Args, BinaryOp, EnumDeclaration, EnumVariant, Expr, Path, UnaryOp, VarType},
     tokenizer::Token,
 };
 
@@ -28,6 +29,14 @@ impl Variable {
         })
     }
 
+    fn new_immutable(value: Option<Expr>) -> Option<Self> {
+        Some(Self {
+            value,
+            var_type: None,
+            mutable: false,
+        })
+    }
+
     fn new_mutable_typed(value: Option<Expr>, var_type: Type) -> Result<Self, String> {
         if let Some(value) = &value {
             let new_type = Type::expr_type(&value)
@@ -40,6 +49,21 @@ impl Variable {
             value,
             var_type: Some(var_type),
             mutable: true,
+        })
+    }
+
+    fn new_immutable_typed(value: Option<Expr>, var_type: Type) -> Result<Self, String> {
+        if let Some(value) = &value {
+            let new_type = Type::expr_type(&value)
+                .ok_or_else(|| format!("Cannot infer type of {:?}", value))?;
+            if var_type != new_type {
+                return Err(format!("Expected type {:?}, got {:?}", var_type, new_type));
+            }
+        }
+        Ok(Self {
+            value,
+            var_type: Some(var_type),
+            mutable: false,
         })
     }
 
@@ -64,6 +88,8 @@ pub(crate) enum Type {
     Int,
     String,
     Bool,
+    Enum(Enum),
+    EnumVariant(EnumVariant),
 }
 
 impl Display for Type {
@@ -78,15 +104,53 @@ impl Type {
             Expr::NumLit(_) => Some(Type::Int),
             Expr::StringLit(_) => Some(Type::String),
             Expr::BoolLit(_) => Some(Type::Bool),
+            Expr::EnumDeclaration(EnumDeclaration { name, variants }) => Some(Type::Enum(Enum {
+                name: name.clone(),
+                variants: variants.clone(),
+            })),
+            Expr::EnumVariant(EnumVariant {
+                enum_name,
+                variant_name,
+                values,
+            }) => Some(Type::EnumVariant(EnumVariant {
+                enum_name: enum_name.clone(),
+                variant_name: variant_name.clone(),
+                values: values.clone(),
+            })),
             _ => None,
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Function {
+pub(crate) struct Enum {
+    name: String,
+    variants: Vec<(String, Option<Vec<String>>)>,
+}
+
+impl Display for Enum {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Enum({})", self.name)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct NamedFunction {
     args: Vec<(String, Option<Type>)>,
     body: Expr,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct EnumConstructor {
+    enum_name: String,
+    variant_name: String,
+    args_types: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Function {
+    NamedFunction(NamedFunction),
+    EnumConstructor(EnumConstructor),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -130,13 +194,13 @@ impl Context {
         &mut self,
         name: &String,
         value: Expr,
-        var_type: Option<String>,
+        var_type: Option<VarType>,
     ) -> Result<Expr, String> {
         let new_var_type = match var_type {
             Some(var_type) => Some(
                 self.types
-                    .get(&var_type)
-                    .ok_or(format!("Invalid type: {}", var_type))?
+                    .get(&type_path_to_string(&var_type))
+                    .ok_or(format!("Invalid type: {}", type_path_to_string(&var_type)))?
                     .clone(),
             ),
             None => None,
@@ -192,6 +256,16 @@ impl Context {
     ];
 }
 
+// FIXME: This is a hack before namespaces are correctly implemented
+fn type_path_to_string(var_type: &VarType) -> String {
+    let (name, path) = var_type;
+    if path.len() > 0 {
+        format!("{}::{}", name, path.join("::"))
+    } else {
+        name.clone()
+    }
+}
+
 pub(crate) fn interpret(c: &mut Context, expr: Expr) -> Result<Expr, String> {
     trace!("Interpreting: {:?}, context: {:?}", expr, c);
     match expr {
@@ -217,6 +291,7 @@ pub(crate) fn interpret(c: &mut Context, expr: Expr) -> Result<Expr, String> {
         Expr::FunctionDeclaration(name, args, body) => {
             interpret_function_declaration(c, &name, args, *body)
         }
+        Expr::EnumDeclaration(enum_decl) => interpret_enum_declaration(c, &enum_decl),
         Expr::Block(expressions) => {
             let mut last = Expr::NoOp;
             c.vars.push(HashMap::new());
@@ -226,8 +301,8 @@ pub(crate) fn interpret(c: &mut Context, expr: Expr) -> Result<Expr, String> {
             c.vars.pop();
             Ok(last)
         }
-        Expr::NumLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => Ok(expr),
-        Expr::Identifier(var_name) => interpret_identifier(c, var_name),
+        Expr::NumLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) | Expr::EnumVariant(_) => Ok(expr),
+        Expr::Identifier(var_name, path) => interpret_identifier(c, var_name, path),
         Expr::Assignment(var_name, value, var_type) => {
             interpret_assignment(c, var_name, *value, var_type)
         }
@@ -278,7 +353,11 @@ fn interpret_if(
     }
 }
 
-fn interpret_identifier(c: &mut Context, var_name: String) -> Result<Expr, String> {
+fn interpret_identifier(c: &mut Context, var_name: String, path: Path) -> Result<Expr, String> {
+    if path.len() > 0 {
+        return Err(format!("Expected a variable, got {:?}", path));
+    }
+
     let v = c
         .get_var_value(&var_name)
         .ok_or(format!("variable({}) not set", var_name))?;
@@ -289,7 +368,7 @@ fn interpret_assignment(
     c: &mut Context,
     var_name: String,
     value: Expr,
-    var_type: Option<String>,
+    var_type: Option<VarType>,
 ) -> Result<Expr, String> {
     let lit = expect_literal(c, value)?;
     c.set_var(&var_name, lit, var_type)
@@ -305,40 +384,150 @@ fn interpret_function_call(c: &mut Context, name: &str, args: Vec<Expr>) -> Resu
                 .get(fn_name)
                 .ok_or(format!("Function({}) not found", fn_name))?
                 .clone();
-            if func.args.len() != args.len() {
-                return Err(format!(
-                    "Expected {} arguments, got {}",
-                    func.args.len(),
-                    args.len()
-                ));
+            trace!("Interpreting function({}) with args: {:?}", fn_name, args);
+            match func {
+                Function::NamedFunction(func) => interpret_named_function(c, &func, args),
+                Function::EnumConstructor(func) => interpret_enum_constructor(c, &func, args),
             }
-
-            // create a new scope for the function
-            let mut vars = HashMap::new();
-            for (i, (arg_name, arg_type)) in func.args.iter().enumerate() {
-                let arg = args.get(i).ok_or("Expected an argument")?;
-                let arg = expect_literal(c, arg.clone())?;
-                let var = match arg_type {
-                    Some(arg_type) => Variable::new_mutable_typed(Some(arg), arg_type.clone())?,
-                    None => Variable::new_mutable(Some(arg)).unwrap(),
-                };
-                vars.insert(arg_name.clone(), var);
-            }
-            c.vars.push(vars);
-            trace!("Interpreting function({}) with args: {:?}", name, args);
-            let res = interpret(c, func.body.clone())?;
-            c.vars.pop();
-            Ok(res)
         }
     }
+}
+
+fn interpret_named_function(
+    c: &mut Context,
+    func: &NamedFunction,
+    args: Vec<Expr>,
+) -> Result<Expr, String> {
+    if func.args.len() != args.len() {
+        return Err(format!(
+            "Expected {} arguments, got {}",
+            func.args.len(),
+            args.len()
+        ));
+    }
+
+    // create a new scope for the function
+    let mut vars = HashMap::new();
+    for (i, (arg_name, arg_type)) in func.args.iter().enumerate() {
+        let arg = args.get(i).ok_or("Expected an argument")?;
+        let arg = expect_literal(c, arg.clone())?;
+        let var = match arg_type {
+            Some(arg_type) => Variable::new_mutable_typed(Some(arg), arg_type.clone())?,
+            None => Variable::new_mutable(Some(arg)).unwrap(),
+        };
+        vars.insert(arg_name.clone(), var);
+    }
+    c.vars.push(vars);
+    let res = interpret(c, func.body.clone())?;
+    c.vars.pop();
+    Ok(res)
+}
+
+fn interpret_enum_constructor(
+    c: &mut Context,
+    func: &EnumConstructor,
+    args: Vec<Expr>,
+) -> Result<Expr, String> {
+    if func.args_types.len() != args.len() {
+        return Err(format!(
+            "Expected {} arguments, got {}",
+            func.args_types.len(),
+            args.len()
+        ));
+    }
+    let values = args
+        .into_iter()
+        .map(|arg| expect_literal(c, arg))
+        .collect::<Result<Vec<_>, String>>()?;
+
+    // Check if arg types match the variant's type
+    for (i, (arg_type, arg)) in func.args_types.iter().zip(values.iter()).enumerate() {
+        let arg_type = c
+            .types
+            .get(arg_type)
+            .ok_or(format!("Type({}) not found", arg_type))?;
+        let arg = Type::expr_type(arg).ok_or(format!("Cannot infer type of {:?}", arg))?;
+        if arg_type != &arg {
+            return Err(format!(
+                "Expected type({}) for argument({}), got type({})",
+                arg_type, i, arg
+            ));
+        }
+    }
+
+    Ok(Expr::EnumVariant(EnumVariant {
+        enum_name: func.enum_name.clone(),
+        variant_name: func.variant_name.clone(),
+        values,
+    }))
+}
+
+fn interpret_enum_declaration(
+    c: &mut Context,
+    enum_decl: &EnumDeclaration,
+) -> Result<Expr, String> {
+    trace!(
+        "Declaring enum({}) with variants: {:?}",
+        enum_decl.name, enum_decl.variants
+    );
+
+    // Each variant must be unique
+    let mut variant_names = HashMap::new();
+    for (variant_name, args) in enum_decl.variants.iter() {
+        if variant_names.contains_key(variant_name) {
+            return Err(format!("Variant({}) already declared", variant_name));
+        }
+        variant_names.insert(variant_name.clone(), args.clone());
+    }
+
+    // Each variant is a constructor of this type
+    for (variant_name, args) in enum_decl.variants.iter() {
+        if args.is_some() {
+            c.functions.insert(
+                variant_name.to_string(),
+                Function::EnumConstructor(EnumConstructor {
+                    enum_name: enum_decl.name.to_string(),
+                    variant_name: variant_name.to_string(),
+                    args_types: args.clone().unwrap_or_default(),
+                }),
+            );
+        } else {
+            let enum_var = EnumVariant {
+                enum_name: enum_decl.name.to_string(),
+                variant_name: variant_name.to_string(),
+                values: vec![],
+            };
+            let var = Variable::new_immutable_typed(
+                Some(Expr::EnumVariant(enum_var.clone())),
+                Type::EnumVariant(enum_var),
+            )?;
+            let global_scope = c.vars.first_mut().unwrap();
+            global_scope.insert(variant_name.to_string(), var);
+        }
+    }
+
+    if c.types.contains_key(&enum_decl.name) {
+        return Err(format!("Type({}) already declared", enum_decl.name));
+    }
+
+    let enum_type = Type::Enum(Enum {
+        name: enum_decl.name.to_string(),
+        variants: enum_decl.variants.clone(),
+    });
+    c.types.insert(enum_decl.name.to_string(), enum_type);
+    Ok(Expr::NoOp)
 }
 
 fn interpret_function_declaration(
     c: &mut Context,
     name: &str,
-    args: Vec<(String, Option<String>)>,
+    args: Args,
     body: Expr,
 ) -> Result<Expr, String> {
+    if c.functions.contains_key(name) {
+        return Err(format!("Function({}) already declared", name));
+    }
+
     let args = args
         .into_iter()
         .map(|(name, var_type)| {
@@ -346,15 +535,17 @@ fn interpret_function_declaration(
                 name,
                 var_type.map(|t| {
                     c.types
-                        .get(&t)
-                        .expect(format!("Invalid type: {}", t).as_str())
+                        .get(&type_path_to_string(&t))
+                        .expect(format!("Invalid type: {}", type_path_to_string(&t)).as_str())
                         .clone()
                 }),
             )
         })
         .collect();
-    c.functions
-        .insert(name.to_string(), Function { args, body });
+    c.functions.insert(
+        name.to_string(),
+        Function::NamedFunction(NamedFunction { args, body }),
+    );
     Ok(Expr::NoOp)
 }
 
@@ -404,9 +595,10 @@ fn yap(c: &mut Context, p1: &Expr) -> Result<Expr, String> {
 fn vibe(c: &mut Context, p1: &Expr) -> Result<Expr, String> {
     let arg = expect_literal(c, p1.clone())?;
     match p1 {
-        Expr::Identifier(name) => {
+        Expr::Identifier(name, path) => {
+            trace!("Vibing identifier({}) with path: {:?}", name, path);
             let var = c
-                .get_var(name)
+                .get_var(&type_path_to_string(&(name.to_string(), path.clone())))
                 .ok_or(format!("Variable({}) not found", name))?;
             Ok(Expr::StringLit(
                 var.var_type
@@ -418,7 +610,7 @@ fn vibe(c: &mut Context, p1: &Expr) -> Result<Expr, String> {
         Expr::NumLit(_) | Expr::StringLit(_) | Expr::BoolLit(_) => {
             Ok(Expr::StringLit(Type::expr_type(&arg).unwrap().to_string()))
         }
-        _ => unimplemented!(),
+        expr => unimplemented!("vibe({:?})", expr),
     }
 }
 
@@ -605,7 +797,7 @@ mod tests {
         let mut c = Context::new();
         let res = interpret(
             &mut c,
-            helpers::assignment_typed("a".to_string(), num_lit(42), "int".to_string()),
+            helpers::assignment_typed("a".to_string(), num_lit(42), ("int".to_string(), vec![])),
         )?;
         assert_eq!(res, num_lit(42));
         Ok(())
@@ -616,7 +808,7 @@ mod tests {
         let mut c = Context::new();
         let res = interpret(
             &mut c,
-            helpers::assignment_typed("a".to_string(), num_lit(42), "string".to_string()),
+            helpers::assignment_typed("a".to_string(), num_lit(42), ("string".to_string(), vec![])),
         );
         assert!(res.is_err());
         Ok(())
@@ -627,7 +819,7 @@ mod tests {
         let mut c = Context::new();
         let res = interpret(
             &mut c,
-            helpers::assignment_typed("a".to_string(), num_lit(42), "int".to_string()),
+            helpers::assignment_typed("a".to_string(), num_lit(42), ("int".to_string(), vec![])),
         )?;
         assert_eq!(res, num_lit(42));
         Ok(())
@@ -666,7 +858,7 @@ mod tests {
             &mut c,
             helpers::function_declaration(
                 "add".to_string(),
-                vec![("a".to_string(), Some("int".to_string()))],
+                vec![("a".to_string(), Some(("int".to_string(), vec![])))],
                 iden("a"),
             ),
         )?;
@@ -686,7 +878,7 @@ mod tests {
             &mut c,
             helpers::function_declaration(
                 "add".to_string(),
-                vec![("a".to_string(), Some("int".to_string()))],
+                vec![("a".to_string(), Some(("int".to_string(), vec![])))],
                 iden("a"),
             ),
         )
@@ -706,7 +898,7 @@ mod tests {
             &mut c,
             helpers::function_declaration(
                 "add".to_string(),
-                vec![("a".to_string(), Some("int".to_string()))],
+                vec![("a".to_string(), Some(("int".to_string(), vec![])))],
                 iden("a"),
             ),
         )
@@ -726,7 +918,7 @@ mod tests {
             &mut c,
             helpers::function_declaration(
                 "fact".to_string(),
-                vec![("n".to_string(), Some("int".to_string()))],
+                vec![("n".to_string(), Some(("int".to_string(), vec![])))],
                 helpers::if_expr(
                     binary(BinaryOp::Equal, iden("n"), num_lit(0)),
                     num_lit(1),
@@ -747,6 +939,133 @@ mod tests {
             helpers::function_call("fact".to_string(), vec![num_lit(5)]),
         )?;
         assert_eq!(fact5, num_lit(120));
+        Ok(())
+    }
+
+    #[test]
+    fn enum_declaration() -> Result<(), String> {
+        let mut c = Context::new();
+        let res = interpret(
+            &mut c,
+            helpers::enum_dec(
+                "Option".to_string(),
+                vec![
+                    ("Some".to_string(), Some(vec!["int".to_string()])),
+                    ("None".to_string(), None),
+                ],
+            ),
+        )?;
+        assert_eq!(res, helpers::no_op());
+        assert_eq!(
+            c.types.get("Option"),
+            Some(&Type::Enum(Enum {
+                name: "Option".to_string(),
+                variants: vec![
+                    ("Some".to_string(), Some(vec!["int".to_string()])),
+                    ("None".to_string(), None),
+                ],
+            }))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn enum_declaration_already_declared() -> Result<(), String> {
+        let mut c = Context::new();
+        interpret(&mut c, helpers::enum_dec("Option".to_string(), vec![]))?;
+        assert!(interpret(&mut c, helpers::enum_dec("Option".to_string(), vec![])).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn fn_declaration_already_declared() -> Result<(), String> {
+        let mut c = Context::new();
+        interpret(
+            &mut c,
+            helpers::function_declaration("add".to_string(), vec![], iden("a")),
+        )?;
+        assert!(
+            interpret(
+                &mut c,
+                helpers::function_declaration("add".to_string(), vec![], iden("a"))
+            )
+            .is_err()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn enum_value_without_param() -> Result<(), String> {
+        let mut c = Context::new();
+        let res = interpret(
+            &mut c,
+            block(&[
+                helpers::enum_dec(
+                    "Option".to_string(),
+                    vec![
+                        ("Some".to_string(), Some(vec!["int".to_string()])),
+                        ("None".to_string(), None),
+                    ],
+                ),
+                helpers::iden("None"),
+            ]),
+        )?;
+        assert_eq!(
+            res,
+            Expr::EnumVariant(EnumVariant {
+                enum_name: "Option".to_string(),
+                variant_name: "None".to_string(),
+                values: vec![],
+            })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn enum_value_with_param() -> Result<(), String> {
+        let mut c = Context::new();
+        let res = interpret(
+            &mut c,
+            block(&[
+                helpers::enum_dec(
+                    "Option".to_string(),
+                    vec![
+                        ("Some".to_string(), Some(vec!["int".to_string()])),
+                        ("None".to_string(), None),
+                    ],
+                ),
+                helpers::function_call("Some".to_string(), vec![num_lit(42)]),
+            ]),
+        )?;
+        assert_eq!(
+            res,
+            Expr::EnumVariant(EnumVariant {
+                enum_name: "Option".to_string(),
+                variant_name: "Some".to_string(),
+                values: vec![num_lit(42)],
+            })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn enum_variant_type() -> Result<(), String> {
+        // enum A {B(int)}; B(true)
+        // should be an error
+        let mut c = Context::new();
+        let res = interpret(
+            &mut c,
+            helpers::enum_dec(
+                "A".to_string(),
+                vec![("B".to_string(), Some(vec!["int".to_string()]))],
+            ),
+        )?;
+        assert_eq!(res, helpers::no_op());
+        let res = interpret(
+            &mut c,
+            helpers::function_call("B".to_string(), vec![bool_lit(true)]),
+        );
+        assert!(res.is_err());
         Ok(())
     }
 }

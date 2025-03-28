@@ -26,7 +26,9 @@ pub(crate) enum Token {
     While,
     Negate,
     Colon,
+    DoubleColon,
     Function,
+    Enum,
     Ident(String),
 }
 
@@ -55,7 +57,7 @@ pub(crate) fn tokenize(inp: &str) -> Result<Vec<Token>, String> {
             }
             ' ' => None,
             ',' => Some(Token::Comma),
-            ':' => Some(Token::Colon),
+            ':' => Some(tokenize_colon(&mut i, &inp)?),
             ';' => Some(Token::SemiColon),
             '{' => Some(Token::OpenCurly),
             '}' => Some(Token::CloseCurly),
@@ -73,6 +75,15 @@ pub(crate) fn tokenize(inp: &str) -> Result<Vec<Token>, String> {
     }
     trace!("Tokens: {:?}", tokens);
     Ok(tokens)
+}
+
+fn tokenize_colon(i: &mut usize, inp: &[char]) -> Result<Token, String> {
+    if let Some(':') = inp.get(*i + 1) {
+        *i += 1;
+        Ok(Token::DoubleColon)
+    } else {
+        Ok(Token::Colon)
+    }
 }
 
 fn tokenize_comment(i: &mut usize, inp: &[char]) -> Result<(), String> {
@@ -160,6 +171,7 @@ fn built_in(s: &String) -> Option<Token> {
         "else" => Some(Token::Else),
         "while" => Some(Token::While),
         "fn" => Some(Token::Function),
+        "enum" => Some(Token::Enum),
         _ => None,
     }
 }
@@ -540,6 +552,45 @@ mod tests {
                 Token::NumLiteral(1),
                 Token::SemiColon,
                 Token::CloseCurly,
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn tokenize_enum() -> Result<(), String> {
+        let inp = "enum A { B(int, int), C }";
+        let tokens = tokenize(inp)?;
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Enum,
+                Token::Ident("A".to_string()),
+                Token::OpenCurly,
+                Token::Ident("B".to_string()),
+                Token::LeftPar,
+                Token::Ident("int".to_string()),
+                Token::Comma,
+                Token::Ident("int".to_string()),
+                Token::RightPar,
+                Token::Comma,
+                Token::Ident("C".to_string()),
+                Token::CloseCurly
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn tokenize_double_colon() -> Result<(), String> {
+        let inp = "A::B";
+        let tokens = tokenize(inp)?;
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Ident("A".to_string()),
+                Token::DoubleColon,
+                Token::Ident("B".to_string())
             ]
         );
         Ok(())

@@ -8,3 +8,18 @@ yap(" ")
 c bet 2
 i bet 0
 yap(cook i < 3 { i = i + 1; c = c * c; })
+
+// optional values
+d bet lacking
+
+fr? d be lacking nah {
+    yap("d holds a value")
+}
+
+// results
+e bet W 7 |> square |> format ("W num: {}", _)
+f bet L "L rizz"
+
+fr? e be W(e) {
+    yap(e)
+}
