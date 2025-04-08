@@ -20,7 +20,7 @@ mod scope_manager;
 mod variable;
 
 use crate::{
-    expression::{BinaryOp, EnumDeclaration, EnumVariant, Expr, Path, UnaryOp, VarType},
+    expression::{BinaryOp, EnumDeclaration, EnumVariant, Expr, Id, Path, UnaryOp, VarType},
     tokenizer::Token,
 };
 
@@ -191,6 +191,7 @@ impl Context {
             }
             Expr::If(cond, then, else_) => self.interpret_if(*cond, *then, else_.map(|e| *e)),
             Expr::While(cond, body) => self.interpet_while(*cond, *body),
+            Expr::Is(iden, enum_variant) => self.interpret_is(iden, *enum_variant),
             expr => unimplemented!("{:?}", expr),
         }
     }
@@ -245,7 +246,7 @@ impl Context {
 
     fn interpret_assignment(
         &mut self,
-        var_name: String,
+        var_name: Id,
         value: Expr,
         var_type: Option<VarType>,
     ) -> Result<Expr, String> {
@@ -309,6 +310,16 @@ impl Context {
             variants: enum_decl.variants.clone(),
         });
         self.types.insert(enum_decl.name.to_string(), enum_type);
+        Ok(Expr::NoOp)
+    }
+
+    fn interpret_is(&mut self, iden: Id, enum_variant: Expr) -> Result<Expr, String> {
+        let var_value = self
+            .scopes
+            .get_var_value(&iden)
+            .ok_or(format!("Variable({}) not set", iden))?;
+
+        let enum_variant = self.expect_literal(enum_variant)?;
         Ok(Expr::NoOp)
     }
 

@@ -40,22 +40,25 @@ pub(crate) struct EnumDeclaration {
     pub(crate) variants: Vec<(String, Option<Vec<String>>)>,
 }
 
+pub(crate) type Id = String;
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Expr {
     NumLit(i32),
     StringLit(String),
     BoolLit(bool),
-    Identifier(String, Path),
+    Identifier(Id, Path),
     Unary(UnaryOp, Box<Expr>),
     Binary(BinaryOp, Box<Expr>, Box<Expr>),
     FunctionCall(Token, Vec<Expr>),
     Block(Vec<Expr>),
-    Assignment(String, Box<Expr>, Option<VarType>),
+    Assignment(Id, Box<Expr>, Option<VarType>),
     If(Box<Expr>, Box<Expr>, Option<Box<Expr>>),
     While(Box<Expr>, Box<Expr>),
     FunctionDeclaration(String, Args, Box<Expr>),
     EnumDeclaration(EnumDeclaration),
     EnumVariant(EnumVariant),
+    Is(Id, Box<Expr>),
     NoOp,
 }
 
@@ -63,7 +66,7 @@ pub(crate) enum Expr {
 pub(crate) mod helpers {
     use crate::tokenizer::Token;
 
-    use super::{Args, BinaryOp, EnumDeclaration, Expr, UnaryOp, VarType};
+    use super::{Args, BinaryOp, EnumDeclaration, EnumVariant, Expr, Id, UnaryOp, VarType};
 
     pub(crate) fn num_lit(n: i32) -> Expr {
         Expr::NumLit(n)
@@ -131,6 +134,18 @@ pub(crate) mod helpers {
 
     pub(crate) fn function_declaration(name: String, args: Args, body: Expr) -> Expr {
         Expr::FunctionDeclaration(name, args, Box::new(body))
+    }
+
+    pub(crate) fn enum_variant(enum_name: &str, variant_name: &str, values: Vec<Expr>) -> Expr {
+        Expr::EnumVariant(EnumVariant {
+            enum_name: enum_name.to_string(),
+            variant_name: variant_name.to_string(),
+            values,
+        })
+    }
+
+    pub(crate) fn is_expr(iden: Id, enum_variant: Expr) -> Expr {
+        Expr::Is(iden, Box::new(enum_variant))
     }
 }
 
@@ -396,7 +411,7 @@ impl Parser {
     #[instrument(level = "trace", skip_all)]
     fn parse_assignment(&mut self) -> Result<Option<Expr>, String> {
         let start = self.pos;
-        let left = match self.parse_comp() {
+        let left = match self.parse_is() {
             Ok(Some(expr)) => expr,
             left @ _ => return left,
         };
@@ -405,7 +420,7 @@ impl Parser {
         let var_type = match self.peek() {
             Some(Token::Colon) => {
                 self.consume();
-                let right = match self.parse_comp() {
+                let right = match self.parse_is() {
                     Ok(Some(Expr::Identifier(id, path))) => (id, path),
                     expr @ _ => return Err(format!("Expected type after ':', got {:?}", expr)),
                 };
@@ -420,7 +435,7 @@ impl Parser {
                     return Err(format!("Expected type after ':', got {:?}", path));
                 }
 
-                let right = match self.parse_comp() {
+                let right = match self.parse_is() {
                     Ok(Some(expr)) => expr,
                     expr @ _ => return expr,
                 };
@@ -432,6 +447,29 @@ impl Parser {
 
         if let Some(var_type) = var_type {
             return Err(format!("Expected assignment after ':', got {:?}", var_type));
+        }
+
+        self.pos = start;
+        self.parse_is()
+    }
+
+    fn parse_is(&mut self) -> Result<Option<Expr>, String> {
+        let start = self.pos;
+        let left = match self.parse_comp() {
+            Ok(Some(expr)) => expr,
+            left @ _ => return left,
+        };
+
+        if let Some(Token::Is) = self.consume() {
+            let right = match self.parse_expr() {
+                Ok(Some(expr)) => expr,
+                expr @ _ => return expr,
+            };
+            if let Expr::Identifier(iden, _) = left {
+                return Ok(Some(Expr::Is(iden, Box::new(right))));
+            } else {
+                return Err(format!("Expected identifier after 'is', got {:?}", left));
+            }
         }
 
         self.pos = start;
@@ -1208,6 +1246,36 @@ mod tests {
                 "a".to_string(),
                 iden("c"),
                 ("B".to_string(), vec!["A".to_string()])
+            )
+        );
+    }
+
+    #[test]
+    fn test_is_expr() {
+        // if a is A(n) { n; }
+        let mut parser = Parser::new(vec![
+            Token::If,
+            Token::Ident("a".to_string()),
+            Token::Is,
+            Token::Ident("A".to_string()),
+            Token::LeftPar,
+            Token::Ident("n".to_string()),
+            Token::RightPar,
+            Token::OpenCurly,
+            Token::Ident("n".to_string()),
+            Token::SemiColon,
+            Token::CloseCurly,
+        ]);
+        let expr = parser.parse().unwrap().unwrap();
+        assert_eq!(
+            expr,
+            if_expr(
+                is_expr(
+                    "a".to_string(),
+                    function_call("A".to_string(), vec![iden("n")])
+                ),
+                block(&[iden("n")]),
+                None
             )
         );
     }
