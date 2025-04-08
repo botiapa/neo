@@ -135,10 +135,23 @@ impl Context {
     }
 
     pub(crate) fn interpret(&mut self, expr: Expr) -> Result<Expr, String> {
+        Ok(match expr {
+            Expr::Block(exprs) => {
+                let mut last = Expr::NoOp;
+                for expr in exprs {
+                    last = self.interpret_expr(expr)?;
+                }
+                last
+            }
+            _ => self.interpret_expr(expr)?,
+        })
+    }
+
+    fn interpret_expr(&mut self, expr: Expr) -> Result<Expr, String> {
         trace!("Interpreting: {:?}, context: {:?}", expr, self);
         match expr {
             Expr::Unary(op, a) => match op {
-                UnaryOp::Plus => self.interpret(*a),
+                UnaryOp::Plus => self.interpret_expr(*a),
                 UnaryOp::Minus => self.binary_num_op(i32::saturating_sub, Expr::NumLit(0), *a),
                 UnaryOp::Negate => self.negate(*a),
             },
@@ -164,7 +177,7 @@ impl Context {
                 let mut last = Expr::NoOp;
                 self.scopes.enter_scope();
                 for expr in expressions {
-                    last = self.interpret(expr.into())?;
+                    last = self.interpret_expr(expr.into())?;
                 }
                 self.scopes.leave_scope();
                 Ok(last)
@@ -190,7 +203,7 @@ impl Context {
             if !cond {
                 break;
             }
-            res = self.interpret(body.clone())?;
+            res = self.interpret_expr(body.clone())?;
         }
         trace!("Exiting while loop, result: {:?}", res);
         Ok(res)
@@ -208,10 +221,10 @@ impl Context {
             cond, then, else_
         );
         if cond {
-            self.interpret(then)
+            self.interpret_expr(then)
         } else {
             if let Some(else_) = else_ {
-                self.interpret(else_)
+                self.interpret_expr(else_)
             } else {
                 Ok(Expr::NoOp)
             }
@@ -330,7 +343,7 @@ mod tests {
     #[test]
     fn add() -> Result<(), String> {
         let mut c = Context::new();
-        let res = c.interpret(binary(BinaryOp::Add, num_lit(1), num_lit(2)))?;
+        let res = c.interpret_expr(binary(BinaryOp::Add, num_lit(1), num_lit(2)))?;
         assert_eq!(res, num_lit(3));
         Ok(())
     }
@@ -338,7 +351,7 @@ mod tests {
     #[test]
     fn assignment() -> Result<(), String> {
         let mut c = Context::new();
-        let res = c.interpret(helpers::assignment("a".to_string(), num_lit(1)))?;
+        let res = c.interpret_expr(helpers::assignment("a".to_string(), num_lit(1)))?;
         assert_eq!(res, num_lit(1));
         Ok(())
     }
@@ -346,7 +359,7 @@ mod tests {
     #[test]
     fn test_interpret_block() -> Result<(), String> {
         let mut c = Context::new();
-        let res = c.interpret(block(&[
+        let res = c.interpret_expr(block(&[
             helpers::assignment("a".to_string(), num_lit(1)),
             helpers::assignment("b".to_string(), num_lit(2)),
             binary(BinaryOp::Add, iden("a"), iden("b")),
@@ -358,7 +371,7 @@ mod tests {
     #[test]
     fn yap() -> Result<(), String> {
         let mut c = Context::new();
-        let res = c.interpret(function(
+        let res = c.interpret_expr(function(
             Token::Ident("yap".to_string()),
             vec![string_lit("hello".to_string())],
         ))?;
@@ -371,7 +384,7 @@ mod tests {
     fn test_chained_assignment() -> Result<(), String> {
         let mut c = Context::new();
         // a=b=1
-        let res = c.interpret(helpers::assignment(
+        let res = c.interpret_expr(helpers::assignment(
             "a".to_string(),
             helpers::assignment("b".to_string(), num_lit(1)),
         ))?;
@@ -384,7 +397,7 @@ mod tests {
     #[test]
     fn if_expr() -> Result<(), String> {
         let mut c = Context::new();
-        let res = c.interpret(helpers::if_expr(bool_lit(true), num_lit(1), None))?;
+        let res = c.interpret_expr(helpers::if_expr(bool_lit(true), num_lit(1), None))?;
         assert_eq!(res, num_lit(1));
         Ok(())
     }
@@ -392,7 +405,7 @@ mod tests {
     #[test]
     fn if_else_expr() -> Result<(), String> {
         let mut c = Context::new();
-        let res = c.interpret(helpers::if_expr(
+        let res = c.interpret_expr(helpers::if_expr(
             bool_lit(false),
             num_lit(1),
             Some(num_lit(2)),
@@ -404,7 +417,7 @@ mod tests {
     #[test]
     fn while_loop() -> Result<(), String> {
         let mut c = Context::new();
-        let res = c.interpret(block(&[
+        let res = c.interpret_expr(block(&[
             helpers::assignment("a".to_string(), num_lit(0)),
             while_expr(
                 binary(BinaryOp::LessThan, iden("a"), num_lit(5)),
@@ -422,7 +435,7 @@ mod tests {
     #[test]
     fn negate() -> Result<(), String> {
         let mut c = Context::new();
-        let res = c.interpret(unary(UnaryOp::Negate, bool_lit(true)))?;
+        let res = c.interpret_expr(unary(UnaryOp::Negate, bool_lit(true)))?;
         assert_eq!(res, bool_lit(false));
         Ok(())
     }
@@ -430,7 +443,7 @@ mod tests {
     #[test]
     fn local_scoped_variable() -> Result<(), String> {
         let mut c = Context::new();
-        let res = c.interpret(block(&[
+        let res = c.interpret_expr(block(&[
             block(&[helpers::assignment("a".to_string(), num_lit(42))]),
             iden("a"),
         ]));
@@ -441,7 +454,7 @@ mod tests {
     #[test]
     fn typed_assignment() -> Result<(), String> {
         let mut c = Context::new();
-        let res = c.interpret(helpers::assignment_typed(
+        let res = c.interpret_expr(helpers::assignment_typed(
             "a".to_string(),
             num_lit(42),
             ("int".to_string(), vec![]),
@@ -453,7 +466,7 @@ mod tests {
     #[test]
     fn typed_assignment_invalid() -> Result<(), String> {
         let mut c = Context::new();
-        let res = c.interpret(helpers::assignment_typed(
+        let res = c.interpret_expr(helpers::assignment_typed(
             "a".to_string(),
             num_lit(42),
             ("string".to_string(), vec![]),
@@ -465,7 +478,7 @@ mod tests {
     #[test]
     fn typed_reassignment() -> Result<(), String> {
         let mut c = Context::new();
-        let res = c.interpret(helpers::assignment_typed(
+        let res = c.interpret_expr(helpers::assignment_typed(
             "a".to_string(),
             num_lit(42),
             ("int".to_string(), vec![]),
@@ -477,7 +490,7 @@ mod tests {
     #[test]
     fn string_concat() -> Result<(), String> {
         let mut c = Context::new();
-        let res = c.interpret(binary(
+        let res = c.interpret_expr(binary(
             BinaryOp::Add,
             string_lit("hello".to_string()),
             string_lit(" world".to_string()),
@@ -489,7 +502,7 @@ mod tests {
     #[test]
     fn string_concat_num() -> Result<(), String> {
         let mut c = Context::new();
-        let res = c.interpret(binary(
+        let res = c.interpret_expr(binary(
             BinaryOp::Add,
             string_lit("hello".to_string()),
             num_lit(1),
@@ -502,13 +515,13 @@ mod tests {
     fn custom_function() -> Result<(), String> {
         // fn add(int a) {a}
         let mut c = Context::new();
-        let res = c.interpret(helpers::function_declaration(
+        let res = c.interpret_expr(helpers::function_declaration(
             "add".to_string(),
             vec![("a".to_string(), Some(("int".to_string(), vec![])))],
             iden("a"),
         ))?;
         assert_eq!(res, helpers::no_op());
-        let res = c.interpret(helpers::function_call("add".to_string(), vec![num_lit(1)]))?;
+        let res = c.interpret_expr(helpers::function_call("add".to_string(), vec![num_lit(1)]))?;
         assert_eq!(res, num_lit(1));
         Ok(())
     }
@@ -516,13 +529,13 @@ mod tests {
     #[test]
     fn function_call_wrong_arg_count() -> Result<(), String> {
         let mut c = Context::new();
-        c.interpret(helpers::function_declaration(
+        c.interpret_expr(helpers::function_declaration(
             "add".to_string(),
             vec![("a".to_string(), Some(("int".to_string(), vec![])))],
             iden("a"),
         ))
         .unwrap();
-        let res = c.interpret(helpers::function_call(
+        let res = c.interpret_expr(helpers::function_call(
             "add".to_string(),
             vec![num_lit(1), num_lit(2)],
         ));
@@ -533,13 +546,13 @@ mod tests {
     #[test]
     fn function_call_wrong_arg_type() -> Result<(), String> {
         let mut c = Context::new();
-        c.interpret(helpers::function_declaration(
+        c.interpret_expr(helpers::function_declaration(
             "add".to_string(),
             vec![("a".to_string(), Some(("int".to_string(), vec![])))],
             iden("a"),
         ))
         .unwrap();
-        let res = c.interpret(helpers::function_call(
+        let res = c.interpret_expr(helpers::function_call(
             "add".to_string(),
             vec![string_lit("hello".to_string())],
         ));
@@ -550,7 +563,7 @@ mod tests {
     #[test]
     fn recursive_function() -> Result<(), String> {
         let mut c = Context::new();
-        let res = c.interpret(helpers::function_declaration(
+        let res = c.interpret_expr(helpers::function_declaration(
             "fact".to_string(),
             vec![("n".to_string(), Some(("int".to_string(), vec![])))],
             helpers::if_expr(
@@ -567,7 +580,8 @@ mod tests {
             ),
         ))?;
         assert_eq!(res, helpers::no_op());
-        let fact5 = c.interpret(helpers::function_call("fact".to_string(), vec![num_lit(5)]))?;
+        let fact5 =
+            c.interpret_expr(helpers::function_call("fact".to_string(), vec![num_lit(5)]))?;
         assert_eq!(fact5, num_lit(120));
         Ok(())
     }
@@ -575,7 +589,7 @@ mod tests {
     #[test]
     fn enum_declaration() -> Result<(), String> {
         let mut c = Context::new();
-        let res = c.interpret(helpers::enum_dec(
+        let res = c.interpret_expr(helpers::enum_dec(
             "Option".to_string(),
             vec![
                 ("Some".to_string(), Some(vec!["int".to_string()])),
@@ -599,9 +613,9 @@ mod tests {
     #[test]
     fn enum_declaration_already_declared() -> Result<(), String> {
         let mut c = Context::new();
-        c.interpret(helpers::enum_dec("Option".to_string(), vec![]))?;
+        c.interpret_expr(helpers::enum_dec("Option".to_string(), vec![]))?;
         assert!(
-            c.interpret(helpers::enum_dec("Option".to_string(), vec![]))
+            c.interpret_expr(helpers::enum_dec("Option".to_string(), vec![]))
                 .is_err()
         );
         Ok(())
@@ -610,13 +624,13 @@ mod tests {
     #[test]
     fn fn_declaration_already_declared() -> Result<(), String> {
         let mut c = Context::new();
-        c.interpret(helpers::function_declaration(
+        c.interpret_expr(helpers::function_declaration(
             "add".to_string(),
             vec![],
             iden("a"),
         ))?;
         assert!(
-            c.interpret(helpers::function_declaration(
+            c.interpret_expr(helpers::function_declaration(
                 "add".to_string(),
                 vec![],
                 iden("a")
@@ -629,14 +643,14 @@ mod tests {
     #[test]
     fn enum_value_without_param() -> Result<(), String> {
         let mut c = Context::new();
-        c.interpret(helpers::enum_dec(
+        c.interpret_expr(helpers::enum_dec(
             "Option".to_string(),
             vec![
                 ("Some".to_string(), Some(vec!["int".to_string()])),
                 ("None".to_string(), None),
             ],
         ))?;
-        let res = c.interpret(helpers::iden(&"None"))?;
+        let res = c.interpret_expr(helpers::iden(&"None"))?;
         assert_eq!(
             res,
             Expr::EnumVariant(EnumVariant {
@@ -651,14 +665,14 @@ mod tests {
     #[test]
     fn enum_value_with_param() -> Result<(), String> {
         let mut c = Context::new();
-        c.interpret(helpers::enum_dec(
+        c.interpret_expr(helpers::enum_dec(
             "Option".to_string(),
             vec![
                 ("Some".to_string(), Some(vec!["int".to_string()])),
                 ("None".to_string(), None),
             ],
         ))?;
-        let res = c.interpret(helpers::function_call(
+        let res = c.interpret_expr(helpers::function_call(
             "Some".to_string(),
             vec![num_lit(42)],
         ))?;
@@ -678,12 +692,12 @@ mod tests {
         // enum A {B(int)}; B(true)
         // should be an error
         let mut c = Context::new();
-        let res = c.interpret(helpers::enum_dec(
+        let res = c.interpret_expr(helpers::enum_dec(
             "A".to_string(),
             vec![("B".to_string(), Some(vec!["int".to_string()]))],
         ))?;
         assert_eq!(res, helpers::no_op());
-        let res = c.interpret(helpers::function_call(
+        let res = c.interpret_expr(helpers::function_call(
             "B".to_string(),
             vec![bool_lit(true)],
         ));
@@ -695,7 +709,7 @@ mod tests {
     fn enum_in_non_global_scope() -> Result<(), String> {
         // {enum A {}} -> should be an error
         let mut c = Context::new();
-        let res = c.interpret(block(&[helpers::enum_dec("A".to_string(), vec![])]));
+        let res = c.interpret_expr(block(&[helpers::enum_dec("A".to_string(), vec![])]));
         assert!(res.is_err());
         Ok(())
     }
@@ -704,7 +718,7 @@ mod tests {
     fn fn_in_non_global_scope() -> Result<(), String> {
         // {fn a() {}} -> should be an error
         let mut c = Context::new();
-        let res = c.interpret(block(&[helpers::function_declaration(
+        let res = c.interpret_expr(block(&[helpers::function_declaration(
             "a".to_string(),
             vec![],
             helpers::no_op(),

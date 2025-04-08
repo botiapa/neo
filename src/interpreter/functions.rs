@@ -105,7 +105,7 @@ impl Context {
             let arg = self.expect_literal(arg.clone())?;
             self.scopes.new_var(arg_name, arg, arg_type.clone())?;
         }
-        let res = self.interpret(func.body.clone())?;
+        let res = self.interpret_expr(func.body.clone())?;
         self.scopes.leave_scope();
         Ok(res)
     }
