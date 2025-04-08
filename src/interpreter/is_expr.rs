@@ -1,8 +1,14 @@
+use std::collections::HashMap;
+
 use tracing::trace;
 
 use crate::expression::{EnumVariant, Expr, Id, helpers::bool_lit};
 
-use super::{Context, Type, functions::Function};
+use super::{
+    Context, Type,
+    functions::{EnumConstructor, Function},
+    scope_manager::ScopeManager,
+};
 
 impl Context {
     /// Interprets an `is` expression.
@@ -34,7 +40,12 @@ impl Context {
         match right {
             Expr::Identifier(iden, _) => self.simple_enum_variant(&left_enum_variant, &iden),
             Expr::FunctionCall(iden, args) => {
-                self.complex_enum_variant(&left_enum_variant, &iden, &args)
+                let enum_constructor = match self.functions.get(&iden) {
+                    Some(Function::EnumConstructor(enum_constructor)) => enum_constructor,
+                    _ => return Err(format!("Function({}) is not an enum constructor", iden)),
+                }
+                .clone();
+                self.complex_enum_variant(&left_enum_variant, enum_constructor, &args)
             }
             _ => return Err(format!("Expected an identifier, got {:?}", right)),
         }
@@ -64,14 +75,9 @@ impl Context {
     fn complex_enum_variant(
         &mut self,
         left_enum_variant: &EnumVariant,
-        iden: &Id,
+        enum_constructor: EnumConstructor,
         args: &Vec<Expr>,
     ) -> Result<Expr, String> {
-        let enum_constructor = match self.functions.get(iden) {
-            Some(Function::EnumConstructor(enum_constructor)) => enum_constructor,
-            _ => return Err(format!("Function({}) is not an enum constructor", iden)),
-        };
-
         if left_enum_variant.enum_name != enum_constructor.enum_name
             || left_enum_variant.variant_name != enum_constructor.variant_name
         {
@@ -87,15 +93,25 @@ impl Context {
             .zip(args.iter().zip(enum_constructor.args_types.iter()))
         {
             match right_val {
+                // binding
                 Expr::Identifier(iden, _) => {
-                    let arg_type = self
-                        .types
-                        .get(arg_type)
-                        .expect("arg type should exist given enum constructors are created by the interpreter")
-                        .clone();
-                    self.scopes
-                        .new_var(&iden, left_val.clone(), Some(arg_type))?;
-                    trace!("Bound {} to {:?}", iden, left_val);
+                    Self::try_bind(&self.types, &mut self.scopes, iden, left_val, &arg_type)?;
+                }
+                // enum constructor or named function call
+                Expr::FunctionCall(iden, args) => {
+                    let right_inside_enum_ctr = self.try_extract_enum(iden)?;
+                    if let Expr::EnumVariant(left_inside_enum_variant) = left_val {
+                        return self.complex_enum_variant(
+                            left_inside_enum_variant,
+                            right_inside_enum_ctr,
+                            args,
+                        );
+                    } else {
+                        return Err(format!(
+                            "Expected an enum variant on the left, got {:?}",
+                            left_val
+                        ));
+                    }
                 }
                 _ => {
                     if left_val != right_val {
@@ -106,5 +122,36 @@ impl Context {
         }
 
         Ok(bool_lit(true))
+    }
+
+    fn try_bind(
+        types: &HashMap<String, Type>,
+        scopes: &mut ScopeManager,
+        iden: &Id,
+        left_val: &Expr,
+        arg_type: &str,
+    ) -> Result<(), String> {
+        let arg_type = types
+            .get(arg_type)
+            .expect("arg type should exist given enum constructors are created by the interpreter")
+            .clone();
+        scopes.new_var(&iden, left_val.clone(), Some(arg_type))?;
+        trace!("Bound {} to {:?}", iden, left_val);
+        Ok(())
+    }
+
+    fn try_extract_enum(&self, iden: &Id) -> Result<EnumConstructor, String> {
+        let func = self
+            .functions
+            .get(iden)
+            .ok_or(format!("Function({}) not found", iden))?
+            .clone();
+        match func {
+            Function::EnumConstructor(func) => Ok(func),
+            _ => Err(format!(
+                "Function({}) is not an enum constructor on the right side of an is expression",
+                iden
+            )),
+        }
     }
 }

@@ -20,10 +20,7 @@ mod operators;
 mod scope_manager;
 mod variable;
 
-use crate::{
-    expression::{BinaryOp, EnumDeclaration, EnumVariant, Expr, Id, Path, UnaryOp, VarType},
-    tokenizer::Token,
-};
+use crate::expression::{BinaryOp, EnumDeclaration, EnumVariant, Expr, Id, Path, UnaryOp, VarType};
 
 #[derive(Debug, Clone, PartialEq)]
 enum Type {
@@ -344,8 +341,8 @@ fn type_path_to_string(var_type: &VarType) -> String {
 #[cfg(test)]
 mod tests {
     use crate::expression::helpers::{
-        self, binary, block, bool_lit, function, function_call, iden, num_lit, string_lit, unary,
-        while_expr,
+        self, binary, block, bool_lit, enum_variant, function, function_call, iden, num_lit,
+        string_lit, unary, while_expr,
     };
     use crate::expression::{BinaryOp, UnaryOp};
     use crate::tokenizer::Token;
@@ -762,6 +759,121 @@ mod tests {
             Some(num_lit(43)),
         ))?;
         assert_eq!(res, num_lit(42));
+        Ok(())
+    }
+
+    #[test]
+    fn enum_inside_enum() -> Result<(), String> {
+        // enum A {A(B)} enum B (B(int)) a = A(B(1))
+        let mut c = Context::new();
+
+        c.interpret_expr(helpers::enum_dec(
+            "A".to_string(),
+            vec![("A".to_string(), Some(vec!["B".to_string()]))],
+        ))
+        .unwrap();
+        c.interpret_expr(helpers::enum_dec(
+            "B".to_string(),
+            vec![("B".to_string(), Some(vec!["int".to_string()]))],
+        ))
+        .unwrap();
+        let res = c
+            .interpret_expr(helpers::assignment(
+                "a".to_string(),
+                helpers::function_call(
+                    "A".to_string(),
+                    vec![helpers::function_call("B".to_string(), vec![num_lit(1)])],
+                ),
+            ))
+            .unwrap();
+        assert_eq!(
+            res,
+            enum_variant("A", "A", vec![enum_variant("B", "B", vec![num_lit(1)])])
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn enum_inside_enum_is_expr() -> Result<(), String> {
+        // enum A {A(B)} enum B {B(int)} a=A(B(1)) if a is A(B(1)) {1} else {420}
+        let mut c = Context::new();
+
+        c.interpret_expr(helpers::enum_dec(
+            "A".to_string(),
+            vec![("A".to_string(), Some(vec!["B".to_string()]))],
+        ))?;
+        c.interpret_expr(helpers::enum_dec(
+            "B".to_string(),
+            vec![("B".to_string(), Some(vec!["int".to_string()]))],
+        ))?;
+        c.interpret_expr(helpers::assignment(
+            "a".to_string(),
+            helpers::function_call(
+                "A".to_string(),
+                vec![helpers::function_call("B".to_string(), vec![num_lit(1)])],
+            ),
+        ))?;
+
+        let res = c.interpret_expr(helpers::if_expr(
+            helpers::is_expr(
+                "a",
+                helpers::function_call(
+                    "A".to_string(),
+                    vec![helpers::function_call("B".to_string(), vec![num_lit(1)])],
+                ),
+            ),
+            num_lit(1),
+            Some(num_lit(420)),
+        ))?;
+        assert_eq!(res, num_lit(1));
+        Ok(())
+    }
+
+    #[test]
+    fn complex_enum_is_expr() -> Result<(), String> {
+        // enum A {A(B, int)} enum B {B(int)} a=A(B(1), 2) if a is A(B(n), 2) {n} else {420}
+        let mut c = Context::new();
+        let res = c.interpret_expr(helpers::enum_dec(
+            "A".to_string(),
+            vec![
+                (
+                    "A".to_string(),
+                    Some(vec!["B".to_string(), "int".to_string()]),
+                ),
+                ("B".to_string(), Some(vec!["int".to_string()])),
+            ],
+        ))?;
+        assert_eq!(res, helpers::no_op());
+        let res = c.interpret_expr(helpers::enum_dec(
+            "B".to_string(),
+            vec![("B".to_string(), Some(vec!["int".to_string()]))],
+        ))?;
+        assert_eq!(res, helpers::no_op());
+        c.interpret_expr(helpers::assignment(
+            "a".to_string(),
+            helpers::function_call(
+                "A".to_string(),
+                vec![
+                    helpers::function_call("B".to_string(), vec![num_lit(1)]),
+                    num_lit(2),
+                ],
+            ),
+        ))?;
+        let res = c.interpret_expr(helpers::if_expr(
+            helpers::is_expr(
+                "a",
+                helpers::function_call(
+                    "A".to_string(),
+                    vec![
+                        helpers::function_call("B".to_string(), vec![num_lit(1)]),
+                        num_lit(2),
+                    ],
+                ),
+            ),
+            num_lit(1),
+            Some(num_lit(420)),
+        ))?;
+        assert_eq!(res, num_lit(1));
         Ok(())
     }
 }

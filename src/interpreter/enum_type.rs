@@ -37,15 +37,16 @@ impl Context {
 
         // Check if arg types match the variant's type
         for (i, (arg_type, arg)) in func.args_types.iter().zip(values.iter()).enumerate() {
-            let arg_type = self
+            let expected_arg_type = self
                 .types
                 .get(arg_type)
                 .ok_or(format!("Type({}) not found", arg_type))?;
             let arg = Type::expr_type(arg).ok_or(format!("Cannot infer type of {:?}", arg))?;
-            if arg_type != &arg {
+
+            if !enum_arg_types_match(expected_arg_type, &arg) {
                 return Err(format!(
                     "Expected type({}) for argument({}), got type({})",
-                    arg_type, i, arg
+                    expected_arg_type, i, arg
                 ));
             }
         }
@@ -55,5 +56,17 @@ impl Context {
             variant_name: func.variant_name.clone(),
             values,
         }))
+    }
+}
+
+fn enum_arg_types_match(expected_arg_type: &Type, arg: &Type) -> bool {
+    match (expected_arg_type, arg) {
+        (Type::Enum(expected_enum), Type::EnumVariant(enumvariant))
+            if enumvariant.enum_name == expected_enum.name =>
+        {
+            true
+        }
+        (a, b) if a == b => true,
+        _ => false,
     }
 }
