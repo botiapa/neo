@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use tracing::trace;
+
 use crate::expression::Expr;
 
 use super::{Type, Variable};
@@ -62,10 +64,12 @@ impl ScopeManager {
     }
 
     pub(crate) fn enter_scope(&mut self) {
+        trace!("Entering scope");
         self.scopes.push(HashMap::new());
     }
 
     pub(crate) fn leave_scope(&mut self) {
-        self.scopes.pop();
+        let dropped_vars = self.scopes.pop();
+        trace!("Leaving scope, dropped vars: {:?}", dropped_vars);
     }
 }

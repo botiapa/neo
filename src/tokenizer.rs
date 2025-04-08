@@ -29,6 +29,7 @@ pub(crate) enum Token {
     DoubleColon,
     Function,
     Enum,
+    Is,
     Ident(String),
 }
 
@@ -172,6 +173,7 @@ fn built_in(s: &String) -> Option<Token> {
         "while" => Some(Token::While),
         "fn" => Some(Token::Function),
         "enum" => Some(Token::Enum),
+        "is" => Some(Token::Is),
         _ => None,
     }
 }
@@ -591,6 +593,23 @@ mod tests {
                 Token::Ident("A".to_string()),
                 Token::DoubleColon,
                 Token::Ident("B".to_string())
+            ]
+        );
+        Ok(())
+    }
+
+    fn tokenize_is() -> Result<(), String> {
+        let inp = "a is A(n)";
+        let tokens = tokenize(inp)?;
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Is,
+                Token::Ident("a".to_string()),
+                Token::Ident("A".to_string()),
+                Token::LeftPar,
+                Token::Ident("n".to_string()),
+                Token::RightPar
             ]
         );
         Ok(())
