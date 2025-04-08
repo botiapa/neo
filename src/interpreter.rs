@@ -15,6 +15,7 @@ mod builtin_functions;
 mod enum_type;
 mod functions;
 mod helpers;
+mod is_expr;
 mod operators;
 mod scope_manager;
 mod variable;
@@ -166,9 +167,7 @@ impl Context {
                 BinaryOp::LessOrEqualThan => self.binary_comp_op(i32::le, *a, *b),
                 BinaryOp::Equal => self.binary_comp_op(i32::eq, *a, *b),
             },
-            Expr::FunctionCall(Token::Ident(fn_name), args) => {
-                self.interpret_function_call(&fn_name, args)
-            }
+            Expr::FunctionCall(fn_name, args) => self.interpret_function_call(&fn_name, args),
             Expr::FunctionDeclaration(name, args, body) => {
                 self.interpret_function_declaration(&name, args, *body)
             }
@@ -190,8 +189,10 @@ impl Context {
                 self.interpret_assignment(var_name, *value, var_type)
             }
             Expr::If(cond, then, else_) => self.interpret_if(*cond, *then, else_.map(|e| *e)),
+            Expr::Is(_, _) => {
+                return Err("Is expr can only be used in an if statement".to_string());
+            }
             Expr::While(cond, body) => self.interpet_while(*cond, *body),
-            Expr::Is(iden, enum_variant) => self.interpret_is(iden, *enum_variant),
             expr => unimplemented!("{:?}", expr),
         }
     }
@@ -216,6 +217,15 @@ impl Context {
         then: Expr,
         else_: Option<Expr>,
     ) -> Result<Expr, String> {
+        if let Expr::Is(iden, enum_variant) = cond {
+            trace!("Interpreting is expression before if");
+            self.scopes.enter_scope();
+            let is_ret = self.interpret_is_expr(iden, *enum_variant)?;
+            let if_ret = self.interpret_if(is_ret, then, else_);
+            self.scopes.leave_scope();
+            return if_ret;
+        }
+
         let cond = self.expect_boollit(cond)?;
         trace!(
             "Interpreting if: {:?}, then: {:?}, else: {:?}",
@@ -313,16 +323,6 @@ impl Context {
         Ok(Expr::NoOp)
     }
 
-    fn interpret_is(&mut self, iden: Id, enum_variant: Expr) -> Result<Expr, String> {
-        let var_value = self
-            .scopes
-            .get_var_value(&iden)
-            .ok_or(format!("Variable({}) not set", iden))?;
-
-        let enum_variant = self.expect_literal(enum_variant)?;
-        Ok(Expr::NoOp)
-    }
-
     const DEFAULT_TYPES: [(&'static str, Type); 4] = [
         ("int", Type::Int),
         ("string", Type::String),
@@ -344,7 +344,8 @@ fn type_path_to_string(var_type: &VarType) -> String {
 #[cfg(test)]
 mod tests {
     use crate::expression::helpers::{
-        self, binary, block, bool_lit, function, iden, num_lit, string_lit, unary, while_expr,
+        self, binary, block, bool_lit, function, function_call, iden, num_lit, string_lit, unary,
+        while_expr,
     };
     use crate::expression::{BinaryOp, UnaryOp};
     use crate::tokenizer::Token;
@@ -383,7 +384,7 @@ mod tests {
     fn yap() -> Result<(), String> {
         let mut c = Context::new();
         let res = c.interpret_expr(function(
-            Token::Ident("yap".to_string()),
+            "yap".to_string(),
             vec![string_lit("hello".to_string())],
         ))?;
         assert_eq!(res, helpers::no_op());
@@ -735,6 +736,32 @@ mod tests {
             helpers::no_op(),
         )]));
         assert!(res.is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn is_expr_with_if() -> Result<(), String> {
+        // enum A {B(int)}
+        // a = B(42)
+        // if a is B(n) {n} else {0}
+        let mut c = Context::new();
+        c.interpret_expr(helpers::enum_dec(
+            "A".to_string(),
+            vec![("B".to_string(), Some(vec!["int".to_string()]))],
+        ))?;
+        c.interpret_expr(helpers::assignment(
+            "a".to_string(),
+            helpers::function_call("B".to_string(), vec![num_lit(42)]),
+        ))?;
+        let res = c.interpret_expr(helpers::if_expr(
+            helpers::is_expr(
+                "a",
+                helpers::function_call("B".to_string(), vec![num_lit(42)]),
+            ),
+            num_lit(42),
+            Some(num_lit(43)),
+        ))?;
+        assert_eq!(res, num_lit(42));
         Ok(())
     }
 }

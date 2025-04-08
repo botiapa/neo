@@ -50,7 +50,7 @@ pub(crate) enum Expr {
     Identifier(Id, Path),
     Unary(UnaryOp, Box<Expr>),
     Binary(BinaryOp, Box<Expr>, Box<Expr>),
-    FunctionCall(Token, Vec<Expr>),
+    FunctionCall(Id, Vec<Expr>),
     Block(Vec<Expr>),
     Assignment(Id, Box<Expr>, Option<VarType>),
     If(Box<Expr>, Box<Expr>, Option<Box<Expr>>),
@@ -96,12 +96,12 @@ pub(crate) mod helpers {
         Expr::Binary(op, Box::new(left), Box::new(right))
     }
 
-    pub(crate) fn function(name: Token, args: Vec<Expr>) -> Expr {
+    pub(crate) fn function(name: String, args: Vec<Expr>) -> Expr {
         Expr::FunctionCall(name, args)
     }
 
     pub(crate) fn function_call(name: String, args: Vec<Expr>) -> Expr {
-        Expr::FunctionCall(Token::Ident(name), args)
+        Expr::FunctionCall(name, args)
     }
 
     pub(crate) fn block(exprs: &[Expr]) -> Expr {
@@ -144,8 +144,8 @@ pub(crate) mod helpers {
         })
     }
 
-    pub(crate) fn is_expr(iden: Id, enum_variant: Expr) -> Expr {
-        Expr::Is(iden, Box::new(enum_variant))
+    pub(crate) fn is_expr(iden: &str, enum_variant: Expr) -> Expr {
+        Expr::Is(iden.to_string(), Box::new(enum_variant))
     }
 }
 
@@ -165,9 +165,10 @@ impl Parser {
         while let Some(block) = self.parse_block()? {
             top_block.push(block);
             trace!(
-                "Pushing top block: {:?}, top_block: {:?}",
+                "Pushing top block: {:?}, top_block: {:?}, remaining tokens: {:?}",
                 top_block.last().unwrap(),
-                top_block
+                top_block,
+                self.remaining_tokens()
             );
         }
 
@@ -190,14 +191,15 @@ impl Parser {
         token
     }
 
+    fn remaining_tokens(&self) -> Vec<Token> {
+        self.tokens.iter().skip(self.pos).cloned().collect()
+    }
+
     fn parse_block(&mut self) -> Result<Option<Expr>, String> {
         let mut block = Vec::new();
         let start = self.pos;
         if let Some(Token::OpenCurly) = self.consume() {
-            trace!(
-                "Parsing block, tokens: {:?}",
-                self.tokens.iter().skip(self.pos).collect::<Vec<_>>()
-            );
+            trace!("Parsing block, tokens: {:?}", self.remaining_tokens());
 
             while let Some(token) = self.peek() {
                 match token {
@@ -213,14 +215,18 @@ impl Parser {
                             trace!(
                                 "Parsed expr, adding to block: {:?} remaining tokens: {:?}",
                                 expr,
-                                self.tokens.iter().skip(self.pos).collect::<Vec<_>>()
+                                self.remaining_tokens()
                             );
                             block.push(expr);
                         }
                     }
                 }
             }
-            trace!("Parsed block: {:?}", block);
+            trace!(
+                "Parsed block: {:?}, remaining tokens: {:?}",
+                block,
+                self.remaining_tokens()
+            );
             return Ok(Some(Expr::Block(block)));
         }
         trace!("Failed to parse block, parsing expr");
@@ -273,7 +279,8 @@ impl Parser {
                 .parse_block()?
                 .ok_or(format!("Expected expression after 'condition'"))?;
             trace!("Parsed then: {:?}", then);
-            if let Some(Token::Else) = self.consume() {
+            if let Some(Token::Else) = self.peek() {
+                self.consume();
                 let else_block = self
                     .parse_block()?
                     .ok_or(format!("Expected expression after 'else'"))?;
@@ -372,7 +379,7 @@ impl Parser {
             while self.peek() != Some(Token::RightPar) {
                 trace!(
                     "Parsing function arg, remaining tokens: {:?}",
-                    self.tokens.iter().skip(self.pos).collect::<Vec<_>>()
+                    self.remaining_tokens()
                 );
                 if let Some(Token::Ident(id)) = self.peek() {
                     self.consume();
@@ -453,6 +460,7 @@ impl Parser {
         self.parse_is()
     }
 
+    #[instrument(level = "trace", skip_all)]
     fn parse_is(&mut self) -> Result<Option<Expr>, String> {
         let start = self.pos;
         let left = match self.parse_comp() {
@@ -630,7 +638,7 @@ impl Parser {
                     }
                 }
                 if let Some(Token::RightPar) = self.consume() {
-                    return Ok(Some(Expr::FunctionCall(Token::Ident(fn_name), args)));
+                    return Ok(Some(Expr::FunctionCall(fn_name, args)));
                 }
                 return Err("Expected ')' after function arguments".to_string());
             }
@@ -1270,13 +1278,27 @@ mod tests {
         assert_eq!(
             expr,
             if_expr(
-                is_expr(
-                    "a".to_string(),
-                    function_call("A".to_string(), vec![iden("n")])
-                ),
+                is_expr("a", function_call("A".to_string(), vec![iden("n")])),
                 block(&[iden("n")]),
                 None
             )
+        );
+    }
+
+    #[test]
+    fn after_if_without_semi() {
+        // if true {} b
+        let mut parser = Parser::new(vec![
+            Token::If,
+            Token::BoolLiteral(true),
+            Token::OpenCurly,
+            Token::CloseCurly,
+            Token::Ident("b".to_string()),
+        ]);
+        let expr = parser.parse().unwrap().unwrap();
+        assert_eq!(
+            expr,
+            block(&[if_expr(bool_lit(true), block(&[]), None), iden("b")])
         );
     }
 }
