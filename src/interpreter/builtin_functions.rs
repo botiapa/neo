@@ -10,7 +10,7 @@ impl Context {
         let arg = self.expect_literal(p1.clone())?;
         let s = match arg {
             Expr::NumLit(a) => a.to_string(),
-            Expr::StringLit(s) => s,
+            Expr::StringLit(s) => s.replace("\\n", "\n"),
             _ => {
                 return Err(format!(
                     "Invalid argument, expected number or string, got {:?}",
@@ -18,7 +18,7 @@ impl Context {
                 ));
             }
         };
-        self.stdout.push(s.to_string());
+        self.stdout.push(s);
         Ok(Expr::NoOp)
     }
 

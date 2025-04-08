@@ -188,7 +188,7 @@ fn built_in_cursed(s: &String) -> Option<Token> {
         "nah" => Some(Token::Else),
         "cook" => Some(Token::While),
         "pack" => Some(Token::Function),
-        "be" => Some(Token::Equal),
+        "be" => Some(Token::Is),
         _ => None,
     }
 }

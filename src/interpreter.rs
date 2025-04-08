@@ -22,13 +22,23 @@ mod variable;
 
 use crate::expression::{BinaryOp, EnumDeclaration, EnumVariant, Expr, Id, Path, UnaryOp, VarType};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 enum Type {
     Int,
     String,
     Bool,
     Enum(Enum),
     EnumVariant(EnumVariant),
+}
+
+impl PartialEq for Type {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Enum(l), Self::EnumVariant(r)) => l.name == r.enum_name,
+            (Self::EnumVariant(l), Self::Enum(r)) => l.enum_name == r.name,
+            _ => core::mem::discriminant(self) == core::mem::discriminant(other),
+        }
+    }
 }
 
 impl Display for Type {
