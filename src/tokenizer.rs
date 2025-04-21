@@ -598,14 +598,15 @@ mod tests {
         Ok(())
     }
 
+    #[test]
     fn tokenize_is() -> Result<(), String> {
         let inp = "a is A(n)";
         let tokens = tokenize(inp)?;
         assert_eq!(
             tokens,
             vec![
-                Token::Is,
                 Token::Ident("a".to_string()),
+                Token::Is,
                 Token::Ident("A".to_string()),
                 Token::LeftPar,
                 Token::Ident("n".to_string()),
