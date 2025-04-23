@@ -3,7 +3,7 @@ use crate::tokenizer::Token;
 use super::Parser;
 
 impl Parser {
-    fn parse_delimited<T>(
+    pub(super) fn parse_delimited<T>(
         &mut self,
         delim: Token,
         start: Token,
@@ -41,7 +41,7 @@ impl Parser {
         Ok(Some(items))
     }
 
-    fn parse_delimited_idents(
+    pub(super) fn parse_delimited_idents(
         &mut self,
         delim: Token,
         start: Token,
@@ -78,6 +78,7 @@ mod tests {
             .parse_delimited_idents(Token::Comma, Token::LeftPar, Token::RightPar)
             .unwrap();
         assert_eq!(result, Some(vec!["a".to_string(), "b".to_string()]));
+        assert!(parser.empty());
     }
 
     #[test]
@@ -111,5 +112,6 @@ mod tests {
             result,
             Err("Expected ',' or ')' after last field".to_string())
         );
+        assert!(parser.empty());
     }
 }

@@ -111,6 +111,10 @@ impl Parser {
         self.tokens.iter().skip(self.pos).cloned().collect()
     }
 
+    fn empty(&self) -> bool {
+        self.pos >= self.tokens.len()
+    }
+
     fn parse_block(&mut self) -> Result<Option<Expr>, String> {
         let mut block = Vec::new();
         let start = self.pos;
@@ -223,45 +227,14 @@ impl Parser {
                 _ => return Err("Expected enum name".to_string()),
             };
 
-            if let Some(Token::OpenCurly) = self.consume() {
-            } else {
-                return Err("Expected '{' after enum name".to_string());
-            }
-
-            let mut variants = Vec::new();
-            loop {
-                let variant = match self.consume() {
-                    Some(Token::Ident(variant)) => variant,
-                    _ => break,
-                };
-                let mut variant_fields = None;
-                if let Some(Token::LeftPar) = self.peek() {
-                    self.consume();
-                    let mut fields = Vec::new();
-                    while let Some(Token::Ident(field)) = self.peek() {
-                        self.consume();
-                        fields.push(field);
-                        if let Some(Token::Comma) = self.peek() {
-                            self.consume();
-                        } else {
-                            if self.consume() != Some(Token::RightPar) {
-                                return Err("Expected ')' after last field".to_string());
-                            }
-                        }
-                    }
-                    variant_fields = Some(fields);
-                }
-                trace!("Parsed variant: {:?}", variant);
-                variants.push((variant, variant_fields));
-                if let Some(Token::Comma) = self.peek() {
-                    self.consume();
-                } else {
-                    if self.consume() != Some(Token::CloseCurly) {
-                        return Err("Expected '}' after enum variants".to_string());
-                    }
-                    break;
-                }
-            }
+            let variants = self
+                .parse_delimited(
+                    Token::Comma,
+                    Token::OpenCurly,
+                    Token::CloseCurly,
+                    Self::parse_enum_variant,
+                )?
+                .ok_or("Expected { after enum name".to_string())?;
 
             trace!("Parsed enum declaration({}): {:?}", name, variants);
             return Ok(Some(Expr::EnumDeclaration(EnumDeclaration {
@@ -273,6 +246,17 @@ impl Parser {
         self.parse_function_declaration()
     }
 
+    fn parse_enum_variant(&mut self) -> Result<(String, Option<Vec<String>>), String> {
+        if let Some(Token::Ident(variant)) = self.peek() {
+            self.consume();
+            let variant_fields =
+                self.parse_delimited_idents(Token::Comma, Token::LeftPar, Token::RightPar)?;
+            Ok((variant, variant_fields))
+        } else {
+            Err("Expected variant name".to_string())
+        }
+    }
+
     #[instrument(level = "trace", skip_all)]
     fn parse_function_declaration(&mut self) -> Result<Option<Expr>, String> {
         let start = self.pos;
@@ -282,44 +266,19 @@ impl Parser {
                 Some(Token::Ident(name)) => name,
                 _ => return Err("Expected function name".to_string()),
             };
-
             trace!("Parsed function name: {:?}", name);
-            if let Some(Token::LeftPar) = self.consume() {
-            } else {
-                return Err("Expected '(' after function name".to_string());
-            }
 
             // parse args
-            let mut args = Vec::new();
             trace!("Parsing function args");
-            while self.peek() != Some(Token::RightPar) {
-                trace!(
-                    "Parsing function arg, remaining tokens: {:?}",
-                    self.remaining_tokens()
-                );
-                if let Some(Token::Ident(id)) = self.peek() {
-                    self.consume();
-                    if let Some(Token::Colon) = self.peek() {
-                        self.consume();
-                        let var_type = match self.parse_expr() {
-                            Ok(Some(Expr::Identifier(var_type, path))) => (var_type, path),
-                            _ => return Err("Expected type after ':'".to_string()),
-                        };
-                        args.push((id, Some(var_type)));
-                    } else {
-                        args.push((id, None));
-                    }
-                }
-                if let Some(Token::Comma) = self.peek() {
-                    self.consume();
-                } else {
-                    if let Some(Token::RightPar) = self.peek() {
-                    } else {
-                        return Err("Expected ')' after last arg".to_string());
-                    }
-                }
-            }
-            self.consume();
+            let args = self
+                .parse_delimited(
+                    Token::Comma,
+                    Token::LeftPar,
+                    Token::RightPar,
+                    Self::parse_function_arg,
+                )?
+                .ok_or("Expected '(' after function name".to_string())?;
+
             let body = self.parse_block()?;
             if let Some(body) = body {
                 return Ok(Some(Expr::FunctionDeclaration(name, args, Box::new(body))));
@@ -329,6 +288,24 @@ impl Parser {
         }
         self.pos = start;
         self.parse_assignment()
+    }
+
+    fn parse_function_arg(&mut self) -> Result<(String, Option<VarType>), String> {
+        if let Some(Token::Ident(id)) = self.peek() {
+            self.consume();
+            if let Some(Token::Colon) = self.peek() {
+                self.consume();
+                let var_type = match self.parse_expr() {
+                    Ok(Some(Expr::Identifier(var_type, path))) => (var_type, path),
+                    _ => return Err("Expected type after ':'".to_string()),
+                };
+                Ok((id, Some(var_type)))
+            } else {
+                return Ok((id, None));
+            }
+        } else {
+            return Err("Expected identifier after '('".to_string());
+        }
     }
 
     #[instrument(level = "trace", skip_all)]
@@ -1050,6 +1027,26 @@ mod tests {
         ]);
         let expr = parser.parse().unwrap().unwrap();
         assert_eq!(expr, enum_dec("A".to_string(), vec![]));
+    }
+
+    #[test]
+    fn unclosed_enum_declaration() {
+        // enum A {
+        let mut parser = Parser::new(vec![
+            Token::Enum,
+            Token::Ident("A".to_string()),
+            Token::OpenCurly,
+        ]);
+        let expr = parser.parse();
+        assert!(expr.is_err());
+    }
+
+    #[test]
+    fn unnamed_enum_declaration() {
+        // enum {}
+        let mut parser = Parser::new(vec![Token::Enum, Token::OpenCurly, Token::CloseCurly]);
+        let expr = parser.parse();
+        assert!(expr.is_err());
     }
 
     #[test]
