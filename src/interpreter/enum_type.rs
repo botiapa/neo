@@ -5,10 +5,13 @@ use crate::expression::{EnumVariant, Expr};
 
 use super::{Context, Type, functions::EnumConstructor};
 
+type VariantName = String;
+type VariantParameters = Option<Vec<String>>;
+type EnumVariantType = (VariantName, VariantParameters);
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct Enum {
     pub(super) name: String,
-    pub(super) variants: Vec<(String, Option<Vec<String>>)>,
+    pub(super) variants: Vec<EnumVariantType>,
 }
 
 impl Display for Enum {

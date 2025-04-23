@@ -2,33 +2,61 @@ use tracing::trace;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Token {
+    /// 123
     NumLiteral(i32),
+    /// "Hello, world!"
     StringLiteral(String),
+    /// true
     BoolLiteral(bool),
+    /// +
     Plus,
+    /// -
     Minus,
+    /// (
     LeftPar,
+    /// )
     RightPar,
+    /// *
     Mult,
+    /// /
     Div,
+    /// =
     Assign,
+    /// ,
     Comma,
+    /// ;
     SemiColon,
+    /// >
     GreaterThan,
+    /// >=
     GreaterOrEqualThan,
+    /// <
     LessThan,
+    /// <=
     LessOrEqualThan,
+    /// ==
     Equal,
+    /// {
     OpenCurly,
+    /// }
     CloseCurly,
+    /// if
     If,
+    /// else
     Else,
+    /// while
     While,
+    /// !
     Negate,
+    /// :
     Colon,
+    /// ::
     DoubleColon,
+    /// fn
     Function,
+    /// enum
     Enum,
+    /// is
     Is,
     Ident(String),
 }
