@@ -35,7 +35,10 @@ impl Parser {
                 // the next token has to be a parse_item
                 items.push(parse_item(self)?);
             } else {
-                return Err("Expected ',' or ')' after last field".to_string());
+                return Err(format!(
+                    "Expected '{:?}' or '{:?}' after last field",
+                    delim, end
+                ));
             }
         }
         Ok(Some(items))
@@ -93,7 +96,7 @@ mod tests {
         let result = parser.parse_delimited_idents(Token::Comma, Token::LeftPar, Token::RightPar);
         assert_eq!(
             result,
-            Err("Expected ',' or ')' after last field".to_string())
+            Err("Expected 'Comma' or 'RightPar' after last field".to_string())
         );
 
         // (a,
@@ -110,7 +113,7 @@ mod tests {
         let result = parser.parse_delimited_idents(Token::Comma, Token::LeftPar, Token::RightPar);
         assert_eq!(
             result,
-            Err("Expected ',' or ')' after last field".to_string())
+            Err("Expected 'Comma' or 'RightPar' after last field".to_string())
         );
         assert!(parser.empty());
     }

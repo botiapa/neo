@@ -476,15 +476,15 @@ impl Parser {
     }
 
     fn parse_primary(&mut self) -> Result<Option<Expr>, String> {
-        if let Ok(Some(expr)) = self.parse_function_call() {
+        if let Some(expr) = self.parse_function_call()? {
             return Ok(Some(expr));
         }
 
-        if let Ok(Some(expr)) = self.parse_unary() {
+        if let Some(expr) = self.parse_unary()? {
             return Ok(Some(expr));
         }
 
-        if let Ok(Some(expr)) = self.parse_paren() {
+        if let Some(expr) = self.parse_paren()? {
             return Ok(Some(expr));
         }
 
@@ -514,26 +514,23 @@ impl Parser {
         Ok(Some(expr))
     }
 
+    #[instrument(level = "trace", skip_all)]
     fn parse_function_call(&mut self) -> Result<Option<Expr>, String> {
         let start = self.pos;
         if let Some(Token::Ident(fn_name)) = self.consume() {
-            if let Some(Token::LeftPar) = self.consume() {
-                let mut args = Vec::new();
-                while self.peek() != Some(Token::RightPar) {
-                    let arg = match self.parse_expr() {
-                        Ok(Some(expr)) => expr,
-                        expr @ _ => return expr,
-                    };
-
-                    args.push(arg);
-                    if let Some(Token::Comma) = self.peek() {
-                        self.consume();
-                    }
-                }
-                if let Some(Token::RightPar) = self.consume() {
-                    return Ok(Some(Expr::FunctionCall(fn_name, args)));
-                }
-                return Err("Expected ')' after function arguments".to_string());
+            let args = self.parse_delimited(
+                Token::Comma,
+                Token::LeftPar,
+                Token::RightPar,
+                Self::parse_expr,
+            )?;
+            trace!("Parsed function call: {:?} with args: {:?}", fn_name, args);
+            if let Some(args) = args {
+                let args = args
+                    .into_iter()
+                    .collect::<Option<Vec<_>>>()
+                    .ok_or("Expected arguments".to_string())?;
+                return Ok(Some(Expr::FunctionCall(fn_name, args)));
             }
         }
         self.pos = start;
@@ -930,6 +927,45 @@ mod tests {
         ]);
         let expr = parser.parse();
         assert!(expr.is_err()); // no null values allowed
+    }
+
+    #[test]
+    fn unclosed_function_call() {
+        // a(1,
+        let mut parser = Parser::new(vec![
+            Token::Ident("a".to_string()),
+            Token::LeftPar,
+            Token::NumLiteral(1),
+            Token::Comma,
+        ]);
+        let expr = parser.parse();
+        assert!(expr.is_err());
+        // a(1
+        let mut parser = Parser::new(vec![
+            Token::Ident("a".to_string()),
+            Token::LeftPar,
+            Token::NumLiteral(1),
+        ]);
+        let expr = parser.parse();
+        assert!(expr.is_err());
+    }
+
+    #[test]
+    fn proper_function_call() {
+        // a(1, 2)
+        let mut parser = Parser::new(vec![
+            Token::Ident("a".to_string()),
+            Token::LeftPar,
+            Token::NumLiteral(1),
+            Token::Comma,
+            Token::NumLiteral(2),
+            Token::RightPar,
+        ]);
+        let expr = parser.parse().unwrap().unwrap();
+        assert_eq!(
+            expr,
+            function_call("a".to_string(), vec![num_lit(1), num_lit(2)])
+        );
     }
 
     #[test]
