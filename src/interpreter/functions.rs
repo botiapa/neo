@@ -1,6 +1,6 @@
 use tracing::trace;
 
-use crate::expression::{Args, Expr};
+use crate::expression::{Args, Expr, FunctionDeclaration};
 
 use super::{Context, Type, type_path_to_string};
 
@@ -8,6 +8,7 @@ use super::{Context, Type, type_path_to_string};
 pub(crate) struct NamedFunction {
     pub(crate) args: Vec<(String, Option<Type>)>,
     pub(crate) body: Expr,
+    pub(crate) generic_args: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -49,11 +50,14 @@ impl Context {
 
     pub(super) fn interpret_function_declaration(
         &mut self,
-        name: &str,
-        args: Args,
-        body: Expr,
+        FunctionDeclaration {
+            name,
+            args,
+            generic_args,
+            body,
+        }: FunctionDeclaration,
     ) -> Result<Expr, String> {
-        if self.functions.contains_key(name) {
+        if self.functions.contains_key(&name) {
             return Err(format!("Function({}) already declared", name));
         }
 
@@ -80,7 +84,11 @@ impl Context {
             .collect();
         self.functions.insert(
             name.to_string(),
-            Function::NamedFunction(NamedFunction { args, body }),
+            Function::NamedFunction(NamedFunction {
+                args,
+                body: *body,
+                generic_args,
+            }),
         );
         Ok(Expr::NoOp)
     }

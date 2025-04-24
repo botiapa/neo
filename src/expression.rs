@@ -40,6 +40,14 @@ pub(crate) struct EnumDeclaration {
     pub(crate) variants: Vec<(String, Option<Vec<String>>)>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct FunctionDeclaration {
+    pub(crate) name: String,
+    pub(crate) args: Args,
+    pub(crate) generic_args: Option<Vec<String>>,
+    pub(crate) body: Box<Expr>,
+}
+
 pub(crate) type Id = String;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -55,7 +63,7 @@ pub(crate) enum Expr {
     Assignment(Id, Box<Expr>, Option<VarType>),
     If(Box<Expr>, Box<Expr>, Option<Box<Expr>>),
     While(Box<Expr>, Box<Expr>),
-    FunctionDeclaration(String, Args, Box<Expr>),
+    FunctionDeclaration(FunctionDeclaration),
     EnumDeclaration(EnumDeclaration),
     EnumVariant(EnumVariant),
     Is(Id, Box<Expr>),
@@ -268,6 +276,10 @@ impl Parser {
             };
             trace!("Parsed function name: {:?}", name);
 
+            // parse generic args
+            let generic_args =
+                self.parse_delimited_idents(Token::Comma, Token::LessThan, Token::GreaterThan)?;
+
             // parse args
             trace!("Parsing function args");
             let args = self
@@ -281,7 +293,12 @@ impl Parser {
 
             let body = self.parse_block()?;
             if let Some(body) = body {
-                return Ok(Some(Expr::FunctionDeclaration(name, args, Box::new(body))));
+                return Ok(Some(Expr::FunctionDeclaration(FunctionDeclaration {
+                    name,
+                    args,
+                    generic_args,
+                    body: Box::new(body),
+                })));
             } else {
                 return Err("Expected expression after ')'".to_string());
             }
@@ -1004,6 +1021,35 @@ mod tests {
                 "a".to_string(),
                 vec![("b".to_string(), Some(("int".to_string(), vec![])))],
                 block(&[])
+            )
+        );
+    }
+
+    #[test]
+    fn test_generic_function_declaration() {
+        // fn a<b>(c: b) {}
+        let mut parser = Parser::new(vec![
+            Token::Function,
+            Token::Ident("a".to_string()),
+            Token::LessThan,
+            Token::Ident("b".to_string()),
+            Token::GreaterThan,
+            Token::LeftPar,
+            Token::Ident("c".to_string()),
+            Token::Colon,
+            Token::Ident("b".to_string()),
+            Token::RightPar,
+            Token::OpenCurly,
+            Token::CloseCurly,
+        ]);
+        let expr = parser.parse().unwrap().unwrap();
+        assert_eq!(
+            expr,
+            generic_function_declaration(
+                "a".to_string(),
+                vec![("c".to_string(), Some(("b".to_string(), vec![])))],
+                block(&[]),
+                vec!["b".to_string()]
             )
         );
     }

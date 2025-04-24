@@ -1,6 +1,9 @@
 use crate::tokenizer::Token;
 
-use super::{Args, BinaryOp, EnumDeclaration, EnumVariant, Expr, Parser, UnaryOp, VarType};
+use super::{
+    Args, BinaryOp, EnumDeclaration, EnumVariant, Expr, FunctionDeclaration, Parser, UnaryOp,
+    VarType,
+};
 
 pub(crate) fn num_lit(n: i32) -> Expr {
     Expr::NumLit(n)
@@ -67,7 +70,26 @@ pub(crate) fn no_op() -> Expr {
 }
 
 pub(crate) fn function_declaration(name: String, args: Args, body: Expr) -> Expr {
-    Expr::FunctionDeclaration(name, args, Box::new(body))
+    Expr::FunctionDeclaration(FunctionDeclaration {
+        name,
+        args,
+        body: Box::new(body),
+        generic_args: None,
+    })
+}
+
+pub(crate) fn generic_function_declaration(
+    name: String,
+    args: Args,
+    body: Expr,
+    generic_args: Vec<String>,
+) -> Expr {
+    Expr::FunctionDeclaration(FunctionDeclaration {
+        name,
+        args,
+        body: Box::new(body),
+        generic_args: Some(generic_args),
+    })
 }
 
 pub(crate) fn enum_variant(enum_name: &str, variant_name: &str, values: Vec<Expr>) -> Expr {

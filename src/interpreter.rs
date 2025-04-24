@@ -175,8 +175,8 @@ impl Context {
                 BinaryOp::Equal => self.binary_comp_op(i32::eq, *a, *b),
             },
             Expr::FunctionCall(fn_name, args) => self.interpret_function_call(&fn_name, args),
-            Expr::FunctionDeclaration(name, args, body) => {
-                self.interpret_function_declaration(&name, args, *body)
+            Expr::FunctionDeclaration(function_declaration) => {
+                self.interpret_function_declaration(function_declaration)
             }
             Expr::EnumDeclaration(enum_decl) => self.interpret_enum_declaration(&enum_decl),
             Expr::Block(expressions) => {
